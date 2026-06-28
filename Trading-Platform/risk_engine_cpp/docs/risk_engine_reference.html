@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>C++ Risk Engine Reference</title>
+<style>
+  body { font-family: Georgia, serif; max-width: 900px; margin: 40px auto; padding: 0 40px; color: #1a1a1a; line-height: 1.7; }
+  h1 { font-size: 2em; border-bottom: 3px solid #1a1a1a; padding-bottom: 10px; margin-top: 60px; }
+  h2 { font-size: 1.4em; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-top: 40px; color: #2c2c2c; }
+  h3 { font-size: 1.1em; margin-top: 30px; color: #333; }
+  code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: 'Courier New', monospace; font-size: 0.9em; }
+  pre { background: #f4f4f4; padding: 16px; border-radius: 5px; overflow-x: auto; border-left: 4px solid #555; font-family: 'Courier New', monospace; font-size: 0.85em; line-height: 1.5; }
+  table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+  th { background: #1a1a1a; color: white; padding: 10px 14px; text-align: left; }
+  td { padding: 9px 14px; border-bottom: 1px solid #ddd; }
+  tr:nth-child(even) td { background: #f9f9f9; }
+  .warning { background: #fff3cd; border-left: 4px solid #f0ad4e; padding: 12px 16px; margin: 16px 0; border-radius: 3px; }
+  .correct { background: #d4edda; border-left: 4px solid #28a745; padding: 12px 16px; margin: 16px 0; border-radius: 3px; }
+  .wrong { background: #f8d7da; border-left: 4px solid #dc3545; padding: 12px 16px; margin: 16px 0; border-radius: 3px; }
+  .section-label { display: inline-block; background: #1a1a1a; color: white; font-size: 0.75em; padding: 2px 8px; border-radius: 3px; margin-bottom: 8px; letter-spacing: 1px; text-transform: uppercase; }
+  @media print { body { margin: 20px; } h1 { page-break-before: always; } h1:first-of-type { page-break-before: avoid; } }
+</style>
+</head>
+<body>
+
+<h1 style="margin-top:0; border-bottom: 3px solid #1a1a1a;">C++ Risk Engine — Complete Reference</h1>
+<p style="color:#666; font-size:0.9em;">Trading Platform Build Log — Stages 2 &amp; 3 &nbsp;|&nbsp; Date: 2026-06-26</p>
+
+<!-- ================================================================ -->
+<h1>Part 1: Architecture Decisions</h1>
+
+<h2>Why C++ and not Python for the risk engine</h2>
+
+<h3>Misunderstanding: "Can't Python hold data in RAM too?"</h3>
+<p>Yes — Python can hold a dict of user cash in memory. The problem is not the language, it is Flask's deployment model.</p>
+
+<p><strong>Flask runs as multiple separate processes, not threads.</strong> Each process has its own copy of memory that is never shared with the others:</p>
+
+<pre>gunicorn --workers 4 app:app
+
+Process A  →  user_cash = {1: £1000}   ← separate copy in RAM
+Process B  →  user_cash = {1: £1000}   ← separate copy in RAM
+Process C  →  user_cash = {1: £1000}   ← separate copy in RAM</pre>
+
+<p>Process A deducts £500. Processes B and C still think the user has £1000. They share no memory. This is a correctness bug — not a performance issue.</p>
+
+<p>The C++ gRPC server is <strong>one single process</strong>. All Flask workers connect to port 50051 over localhost. There is only ever one copy of user state in memory.</p>
+
+<p><strong>Python also has the GIL (Global Interpreter Lock).</strong> Even with threads (not processes), Python can only execute one thread at a time. C++ threads run truly in parallel on separate CPU cores with no such restriction.</p>
+
+<p><strong>The real speed gain is not C++ arithmetic.</strong> A risk check in Python that queries PostgreSQL takes 5–20ms. A C++ memory check takes 0.001ms. Skipping the database is the win — not faster multiplication.</p>
+
+<h2>Why not Kafka for risk checks</h2>
+
+<p>Kafka is async — you publish a message and move on without waiting. <code>CheckOrder</code> is synchronous — Flask blocks waiting for approve or reject before proceeding with the fill. You cannot use a fire-and-forget system to answer a question you are waiting on.</p>
+
+<p>Kafka also adds 5–15ms minimum round-trip latency from the broker. On the hot path of every trade this is unacceptable when the whole point is sub-millisecond risk checks.</p>
+
+<p><strong>Where Kafka is genuinely useful in trading:</strong> broadcasting fills to multiple consumers — audit log, P&amp;L calculator, notification service, analytics. One event, many recipients, no synchronous response needed. This is a Stage 5–6 addition to this platform.</p>
+
+<h2>Mutex vs Partitioned Workers</h2>
+
+<table>
+<tr><th>Approach</th><th>How it works</th><th>Best for</th></tr>
+<tr><td>Mutex + preemptive subtraction</td><td>One UserStateStore, per-user mutex, threads contend per user</td><td>Low-to-medium traffic, simpler code</td></tr>
+<tr><td>Partitioned workers</td><td>N threads each own a slice of users, no locks on user state</td><td>Thousands of orders/sec, production systems</td></tr>
+</table>
+
+<p>We built Approach 1 first. Approach 2 is the upgrade path — the proto file and trading_service do not change, only the internal user state management.</p>
+
+<h2>The Race Condition and How We Solve It</h2>
+
+<h3>The problem</h3>
+<pre>User has £1000
+
+Thread A: reads £1000  →  approves £600 buy  →  returns
+Thread B: reads £1000  →  approves £600 buy  →  returns
+          ↑ both read before either updates memory
+          ↑ user ends up with -£200</pre>
+
+<p><code>UpdateState</code> only runs after Flask commits to the database — too late to prevent the second approval from seeing the stale value.</p>
+
+<h3>The fix: preemptive subtraction</h3>
+<p>Inside <code>check_and_reserve_position</code>, while holding the per-user lock, we subtract the funds <em>before</em> returning the approval:</p>
+
+<pre>Thread A: LOCK user 1 → reads £1000 → subtracts £600 → cash now £400 → UNLOCK → approved
+Thread B: LOCK user 1 → reads £400  → £400 &lt; £600   → UNLOCK → rejected</pre>
+
+<p>Thread B sees the already-deducted value. The race condition is eliminated in C++ memory with no database involvement.</p>
+
+<h3>When update_position runs</h3>
+<p>Flask commits the fill to PostgreSQL, then calls <code>update_position</code> with the authoritative database values. C++ overwrites its tentative subtraction with the real number. If the fill failed, Flask sends the original balance and C++ restores it.</p>
+
+<h3>Why send full values not deltas</h3>
+<div class="wrong"><strong>Deltas can drift:</strong><br>
+C++ has £400 (tentative). Flask sends cash_delta = -600. C++ computes 400 + (-600) = -200. Wrong if the tentative was slightly off.</div>
+<div class="correct"><strong>Full values cannot drift:</strong><br>
+C++ has £400 (tentative). Flask sends new_cash = 400.00 (straight from DB). C++ sets 400.00. Always matches PostgreSQL exactly.</div>
+
+<!-- ================================================================ -->
+<h1>Part 2: Files Written</h1>
+
+<h2>trading.proto</h2>
+<span class="section-label">Contract File</span>
+<p>The contract between Flask (Python) and the risk engine (C++). Neither language yet — a description in proto syntax that the <code>protoc</code> compiler reads to generate real code in both languages automatically.</p>
+
+<h3>What protoc generates</h3>
+<table>
+<tr><th>File</th><th>Language</th><th>Contains</th></tr>
+<tr><td>trading.pb.h / .cc</td><td>C++</td><td>Message classes with getters/setters</td></tr>
+<tr><td>trading.grpc.pb.h / .cc</td><td>C++</td><td>TradingService::Service abstract base class</td></tr>
+<tr><td>trading_pb2.py</td><td>Python</td><td>Python message classes</td></tr>
+<tr><td>trading_pb2_grpc.py</td><td>Python</td><td>TradingServiceStub for Flask to call C++</td></tr>
+</table>
+
+<h3>Proto vs gRPC — they are different things</h3>
+<p><strong>Protocol Buffers (proto)</strong> — defines the messages and the service contract. Handles serialisation of data into bytes.</p>
+<p><strong>gRPC</strong> — the transport layer. Handles network communication — TCP connections, HTTP/2, routing requests to your service methods.</p>
+<p>Proto defines <em>what</em> to send. gRPC handles <em>how</em> to send it. You cannot use one without the other.</p>
+
+<h3>Field numbers</h3>
+<pre>message CheckOrderRequest {
+    string symbol = 1;   // ← not an array index
+    double price   = 2;  // ← a permanent binary identifier
+}</pre>
+<p>Proto serialises to binary using these numbers, not field names. Once assigned, never change them — even if you rename the field. Numbers 1–15 use 1 byte; 16–2047 use 2 bytes. Put your most-used fields first.</p>
+
+<h3>Key design decisions in the proto file</h3>
+<p><strong><code>fill_price</code> in CheckOrderResponse</strong> — C++ returns the exact price it used for the risk check. Flask uses this price for the fill. Eliminates the stale price problem where check and fill use different prices.</p>
+<p><strong>Authoritative values in UpdateStateRequest</strong> — <code>new_cash_balance</code>, <code>new_quantity</code>, <code>new_average_price</code> come straight from PostgreSQL after the fill commits. C++ overwrites, never accumulates deltas.</p>
+<p><strong><code>repeated PositionEntry</code> in LoadUserRequest</strong> — <code>repeated</code> means a list. All of a user's positions sent in one call at login time.</p>
+
+<h3>The service block</h3>
+<pre>service TradingService {
+    rpc CheckOrder   (CheckOrderRequest)   returns (CheckOrderResponse);
+    rpc UpdateState  (UpdateStateRequest)  returns (UpdateStateResponse);
+    rpc LoadUser     (LoadUserRequest)     returns (LoadUserResponse);
+    rpc GetPrice     (GetPriceRequest)     returns (GetPriceResponse);
+    rpc GetAllPrices (GetAllPricesRequest) returns (GetAllPricesResponse);
+}</pre>
+<p>This tells protoc "these five callable functions exist." Protoc generates an abstract C++ base class with five virtual functions. You never write the base class — you write the implementation in <code>trading_service.cpp</code> by inheriting from it.</p>
+
+<h3>gRPC function signatures — why Status and not the response type</h3>
+<pre>Status CheckOrder(ServerContext* ctx,
+                  const CheckOrderRequest* request,
+                  CheckOrderResponse* response);</pre>
+<p>The <code>CheckOrderResponse</code> IS returned — but via the output pointer parameter, not the return value. You fill in the response object inside the function. The <code>Status</code> return value is at the framework level — it tells gRPC whether the function executed successfully (OK) or failed at a network/system level (INTERNAL_ERROR, NOT_FOUND etc.). Your business logic result (approved/rejected) goes inside the response object.</p>
+
+<h2>CMakeLists.txt</h2>
+<span class="section-label">Build Configuration</span>
+<p>CMake reads this file and generates actual build instructions for your platform. You never compile C++ files directly — CMake handles the full pipeline.</p>
+
+<table>
+<tr><th>Section</th><th>What it does</th></tr>
+<tr><td><code>cmake_minimum_required</code></td><td>Fails early if CMake version is too old</td></tr>
+<tr><td><code>project(risk_engine CXX)</code></td><td>Names the project, declares C++ language</td></tr>
+<tr><td><code>set(CMAKE_CXX_STANDARD 17)</code></td><td>Requires C++17 for shared_mutex, optional, structured bindings</td></tr>
+<tr><td><code>find_package(Protobuf CONFIG REQUIRED)</code></td><td>Locates protobuf in MSYS2. CONFIG mode required to avoid target conflicts with gRPC</td></tr>
+<tr><td><code>find_package(gRPC CONFIG REQUIRED)</code></td><td>Locates gRPC in MSYS2. Sets up gRPC::grpc++ link targets</td></tr>
+<tr><td><code>add_custom_command</code></td><td>Runs protoc automatically at build time. Re-runs only if trading.proto changes</td></tr>
+<tr><td><code>add_executable</code></td><td>Compiles all .cpp files including generated proto files into one binary</td></tr>
+<tr><td><code>target_include_directories</code></td><td>Tells compiler where to find headers — build dir for generated files, src/ for your files</td></tr>
+<tr><td><code>target_link_libraries</code></td><td>Links gRPC, protobuf, and libpq (PostgreSQL C client) into the binary</td></tr>
+</table>
+
+<div class="warning"><strong>First cmake error encountered:</strong> <code>find_package(Protobuf REQUIRED)</code> (module mode) conflicted with gRPC's internal find which uses config mode. Fix: change to <code>find_package(Protobuf CONFIG REQUIRED)</code> so both use the same mode.</div>
+
+<h2>price_store.hpp + price_store.cpp</h2>
+<span class="section-label">In-Memory Price Cache</span>
+<p>Thread-safe dictionary mapping symbol strings to <code>PriceData</code> (price, volatility, drift, updated_at). Lives entirely in RAM. The GBM simulation thread writes to it every second. gRPC server threads read from it on every risk check.</p>
+
+<h3>Why shared_mutex not regular mutex</h3>
+<p>A regular mutex allows only one thread at a time — readers queue behind each other for no reason even though simultaneous reads are perfectly safe.</p>
+
+<pre>Regular mutex:
+gRPC thread 1: LOCK → reads AAPL → UNLOCK
+gRPC thread 2: WAITING...
+gRPC thread 3: WAITING...       ← pointless, reads don't conflict
+
+shared_mutex:
+gRPC thread 1: shared_lock ✓   → reads AAPL
+gRPC thread 2: shared_lock ✓   → reads MSFT  ← simultaneous, safe
+GBM thread:    exclusive lock ✗ → waits for readers to finish
+GBM thread:    exclusive lock ✓ → writes, all readers wait</pre>
+
+<h3>Why mutable on the mutex</h3>
+<p><code>get</code> and <code>get_all</code> are <code>const</code> methods — they promise not to modify any member variables. But locking a mutex modifies it internally. <code>mutable</code> is the exception clause: "this one field is allowed to be modified even inside a const method." Without it the compiler rejects locking the mutex inside a const function.</p>
+
+<h3>const at the end of method signatures</h3>
+<pre>std::optional&lt;PriceData&gt; get(const std::string&amp; symbol) const;
+//                           ^                             ^
+//                     parameter won't be modified    method won't modify the object</pre>
+
+<h3>Why two methods — add_symbol vs set_price</h3>
+<p><code>add_symbol</code> is called once per symbol at startup. It sets all four fields: price, volatility, drift, and updated_at. Volatility and drift are GBM parameters — constants loaded from PostgreSQL that never change during the simulation.</p>
+<p><code>set_price</code> is called every second by the GBM thread. It only updates price and timestamp. Passing volatility and drift 86,400 times per day for no reason would be wasteful and misleading about what is actually changing.</p>
+
+<h3>Iterator pattern in C++</h3>
+<pre>auto it = prices.find("AAPL");
+if (it != prices.end()) {      // end() is the "not found" sentinel
+    it-&gt;second.price = 183.0;  // second = value (PriceData)
+}                               // first  = key (symbol string)</pre>
+
+<h3>Reference vs copy — the most common mistake</h3>
+<div class="wrong"><strong>Wrong — modifies a copy, map unchanged:</strong><br>
+<code>PriceData data = it-&gt;second;</code><br>
+<code>data.price = 183.0;  // copy goes out of scope, map still has old price</code></div>
+<div class="correct"><strong>Correct — reference to the real entry:</strong><br>
+<code>PriceData&amp; data = it-&gt;second;</code><br>
+<code>data.price = 183.0;  // modifies the actual map entry</code></div>
+
+<h3>std::optional</h3>
+<p>If a symbol does not exist in the map you cannot return a <code>PriceData</code> — there is nothing to return. <code>std::optional&lt;PriceData&gt;</code> is a wrapper that either contains a value or contains nothing. Return <code>std::nullopt</code> for "not found." The caller must check for empty before using the value — the compiler enforces this.</p>
+
+<h2>user_state_store.hpp + user_state_store.cpp</h2>
+<span class="section-label">In-Memory User State</span>
+<p>Thread-safe store mapping user_id (int) to <code>UserState</code> (cash, per-user mutex, position map). Implements the full preemptive reservation logic for risk checks.</p>
+
+<h3>Why unique_ptr&lt;mutex&gt; not mutex directly</h3>
+<p><code>std::mutex</code> cannot be copied or moved. When you insert <code>UserState</code> into an <code>unordered_map</code>, C++ tries to move it. Since <code>UserState</code> contains a mutex, the move fails to compile.</p>
+
+<p><strong>The heap vs stack:</strong></p>
+<p>The <em>stack</em> is automatic memory inside functions — destroyed when the function ends. The <em>heap</em> is permanent memory allocated explicitly — stays alive until freed. Objects on the heap have a fixed memory address that never changes.</p>
+
+<p><strong>How unique_ptr solves it:</strong></p>
+<p><code>unique_ptr&lt;mutex&gt;</code> stores the mutex on the heap at a fixed address. The pointer itself is just a number (the address) which can be moved freely. Moving the pointer copies the number to a new location — the mutex stays at the same heap address and never knows it happened.</p>
+
+<pre>Stack:                    Heap:
+┌──────────────┐         ┌─────────────┐
+│ unique_ptr   │────────▶│   mutex     │  address: 0x7f3a2100 (fixed)
+│ = 0x7f3a2100 │         │             │
+└──────────────┘         └─────────────┘
+
+After move: pointer moves, mutex stays at same address.</pre>
+
+<p><strong>Why "unique":</strong> Only one <code>unique_ptr</code> can own a given object at a time. Ownership can be transferred (moved) but never shared. When the <code>unique_ptr</code> is destroyed, it automatically frees the object — no manual delete needed.</p>
+
+<p><strong>Dereferencing with *:</strong> The <code>unique_ptr</code> stores an address, not the mutex itself. To get the actual mutex you dereference with <code>*</code>:</p>
+<pre>std::unique_lock ul(*user.lock);  // *user.lock = the actual mutex</pre>
+
+<h3>std::move</h3>
+<pre>user_positions[user_id] = std::move(state);</pre>
+<p>Transfers ownership of <code>state</code>'s contents into the map. After this line, <code>state</code> is an empty shell. The <code>unique_ptr</code> inside it now belongs to the map entry. Without <code>std::move</code>, C++ would try to copy <code>state</code> — copying a <code>unique_ptr</code> is forbidden (only one owner at a time).</p>
+
+<h3>Two-level locking in check_and_reserve_position</h3>
+<pre>Step 1: shared_lock on user_positions_mutex   → safely find user in the map
+Step 2: unique_lock on user.lock              → own this user's state exclusively
+Step 3: unlock user_positions_mutex           → release map lock, keep per-user lock
+Step 4: check cash / position and subtract    → atomic, no other thread can interfere</pre>
+
+<p>Step 3 is the efficiency insight: you only need the map lock long enough to find the user. Once you have the per-user lock, release the map lock so other threads can load different users simultaneously. Hold locks for the minimum time needed.</p>
+
+<!-- ================================================================ -->
+<h1>Part 3: C++ Concepts Reference</h1>
+
+<table>
+<tr><th>Concept</th><th>Syntax</th><th>What it means</th></tr>
+<tr><td>Include guard</td><td><code>#pragma once</code></td><td>Prevents header being included twice in same compilation. No semicolon.</td></tr>
+<tr><td>Const parameter</td><td><code>const std::string&amp; x</code></td><td>Pass by reference, promise not to modify it inside the function</td></tr>
+<tr><td>Const method</td><td><code>void foo() const</code></td><td>Method promises not to modify any member variables</td></tr>
+<tr><td>Mutable field</td><td><code>mutable std::mutex m</code></td><td>This field can be modified even inside a const method</td></tr>
+<tr><td>Read lock</td><td><code>std::shared_lock lock(m)</code></td><td>Multiple threads can hold simultaneously. Use for reads.</td></tr>
+<tr><td>Write lock</td><td><code>std::unique_lock lock(m)</code></td><td>Only one thread at a time. Use for writes and check+subtract.</td></tr>
+<tr><td>Optional</td><td><code>std::optional&lt;T&gt;</code></td><td>Either contains a T or is empty (nullopt). Safe alternative to null.</td></tr>
+<tr><td>Iterator value</td><td><code>it-&gt;second</code></td><td>Value in a map iterator. it-&gt;first is the key.</td></tr>
+<tr><td>Not found sentinel</td><td><code>map.end()</code></td><td>What find() returns when key doesn't exist. Always check against this.</td></tr>
+<tr><td>Reference</td><td><code>T&amp; var = other</code></td><td>Alias to the real thing. Modifications affect the original.</td></tr>
+<tr><td>Move</td><td><code>std::move(x)</code></td><td>Transfer ownership. x becomes empty shell after.</td></tr>
+<tr><td>Unique pointer</td><td><code>std::unique_ptr&lt;T&gt;</code></td><td>Owns one T on heap. Auto-deletes when out of scope. Not copyable.</td></tr>
+<tr><td>Make unique</td><td><code>std::make_unique&lt;T&gt;()</code></td><td>Creates T on heap and returns unique_ptr owning it.</td></tr>
+<tr><td>Dereference</td><td><code>*ptr</code></td><td>Get the actual object the pointer points to.</td></tr>
+<tr><td>Structured binding</td><td><code>auto&amp; [k, v] : map</code></td><td>Unpack map entry into named variables. C++17.</td></tr>
+<tr><td>Class prefix in .cpp</td><td><code>Class::method()</code></td><td>Every method in a .cpp must be prefixed with its class name.</td></tr>
+<tr><td>Aggregate init</td><td><code>MyStruct{a, b, c}</code></td><td>Fill struct fields in declaration order using {}.</td></tr>
+</table>
+
+<!-- ================================================================ -->
+<h1>Part 4: Common Mistakes Reference</h1>
+
+<h2>1. Redefining the class in the .cpp file</h2>
+<div class="wrong"><strong>Wrong:</strong> Writing <code>class PriceStore { ... }</code> inside price_store.cpp</div>
+<div class="correct"><strong>Correct:</strong> The class definition lives only in the .hpp. The .cpp only contains method implementations prefixed with <code>ClassName::</code></div>
+
+<h2>2. Wrong or missing class prefix on methods</h2>
+<div class="wrong"><code>void load_user(...) { }</code><br>This is a free function — not a class method. The compiler cannot find member variables.</div>
+<div class="correct"><code>void UserStateStore::load_user(...) { }</code></div>
+
+<h2>3. Confusing UserState with UserStateStore</h2>
+<p><code>UserState</code> — the struct holding one user's cash, mutex, and positions.<br>
+<code>UserStateStore</code> — the class managing all users. This is the one with the methods.</p>
+
+<h2>4. Modifying a copy instead of a reference</h2>
+<div class="wrong"><code>PriceData data = it-&gt;second;</code> then <code>data.price = x;</code> — modifies a copy, map unchanged.</div>
+<div class="correct"><code>PriceData&amp; data = it-&gt;second;</code> then <code>data.price = x;</code> — modifies the real map entry.</div>
+
+<h2>5. Inverted find condition — the most repeated mistake</h2>
+<pre>// Reading it: "if find result == the not-found sentinel, user doesn't exist"
+if (map.find(id) == map.end())  return false;  // ← correct: not found → false
+if (map.find(id) != map.end())  return false;  // ← wrong: found → false (backwards)</pre>
+
+<h2>6. Variable named same as its type</h2>
+<div class="wrong"><code>std::shared_mutex shared_mutex;</code> — type and variable share the same name, confuses IDE and compiler.</div>
+<div class="correct"><code>std::shared_mutex user_positions_mutex;</code> — descriptive name, no conflict.</div>
+
+<h2>7. Trailing comma in parameter list</h2>
+<div class="wrong"><code>bool check(int id, double price, )</code> — syntax error.</div>
+<div class="correct"><code>bool check(int id, double price)</code></div>
+
+<h2>8. Semicolon after preprocessor directives</h2>
+<div class="wrong"><code>#pragma once;</code></div>
+<div class="correct"><code>#pragma once</code> — preprocessor directives never end with semicolons.</div>
+
+<h2>9. Typo in include angle brackets</h2>
+<div class="wrong"><code>#include &lt;shared_mutex&gt;&gt;</code> — extra closing bracket.</div>
+<div class="correct"><code>#include &lt;shared_mutex&gt;</code></div>
+
+<h2>10. Missing semicolon after unique_lock declaration</h2>
+<div class="wrong"><code>std::unique_lock lock2{*user.lock}</code></div>
+<div class="correct"><code>std::unique_lock lock2{*user.lock};</code></div>
+
+<h2>11. Missing return true after successful reservation</h2>
+<p>After subtracting cash or position quantity inside <code>check_and_reserve_position</code>, always return <code>true</code>. A bool function must always return a value on every path. Add <code>return false</code> at the very end as a fallback for unrecognised side values.</p>
+
+<h2>12. Cannot #include a .cpp file</h2>
+<p>Including a .cpp file copy-pastes its entire content into every file that includes it. If two files include the same .cpp, the compiler sees every class and function defined twice and throws duplicate definition errors.</p>
+<p>The .hpp is the menu — everyone reads it. The .cpp is the kitchen — compiled once, hidden from everyone else. You never include the kitchen.</p>
+
+<!-- ================================================================ -->
+<h1>Part 5: System Architecture Diagram</h1>
+
+<pre style="font-size:0.8em;">
+Flask App (Python — multiple worker processes)
+     Worker A          Worker B          Worker C
+        │                 │                 │
+        └────────┬─────────┘─────────┬───────┘
+                 │   gRPC (localhost:50051)   │
+                 ▼                            │
+    ┌─────────────────────────────────────────┴──┐
+    │         C++ gRPC Risk Engine               │
+    │                                            │
+    │   TradingService (request handler)         │
+    │         │              │                   │
+    │         ▼              ▼                   │
+    │   PriceStore      UserStateStore           │
+    │   shared_mutex    per-user mutex           │
+    │   symbol→price    user_id→cash,positions   │
+    │         ▲              ▲                   │
+    │         │              │                   │
+    │   GBM Thread 1    (seeded on login)        │
+    │   (ticks every 1s)                         │
+    └────────────────────────────────────────────┘
+         │                       │
+         │ async write prices    │ (Flask commits fills)
+         ▼                       ▼
+    PostgreSQL :5433
+    users, accounts, orders, positions, market_prices
+
+Hot path (memory only, &lt;1ms):    CheckOrder
+Warm path (after fill commits):   UpdateState
+Cold path (on login):             LoadUser
+</pre>
+
+<p style="margin-top:60px; color:#888; font-size:0.8em; border-top:1px solid #eee; padding-top:20px;">
+  Generated during build session — Trading Platform Stage 2/3 — C++ Risk Engine
+</p>
+
+</body>
+</html>
