@@ -2,6 +2,7 @@ from flask import Flask
 from config import Config
 from extensions import db, jwt, bcrypt, migrate
 from core.middleware import register_error_handlers
+from services.risk_engine_client import RiskEngineClient
 
 
 def create_app():
@@ -24,9 +25,14 @@ def create_app():
     # Register error handlers
     register_error_handlers(app)
 
+    app.risk_engine = RiskEngineClient(
+    app.config["RISK_ENGINE_HOST"],
+    app.config["RISK_ENGINE_PORT"],
+    )
+
     return app
 
-
+    
 if __name__ == "__main__":
     app = create_app()
     app.run(debug=True)
