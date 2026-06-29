@@ -14,7 +14,7 @@ set(GRPC_HDRS  "${PROTO_OUT}/trading.grpc.pb.h")
 
 add_custom_command(
     OUTPUT "${PROTO_SRCS}" "${PROTO_HDRS}" "${GRPC_SRCS}" "${GRPC_HDRS}"
-    COMMAND ${Protobuf_PROTOC_EXECUTABLE}
+    COMMAND $<TARGET_FILE:protobuf::protoc>
         --cpp_out="${PROTO_OUT}"
         --grpc_out="${PROTO_OUT}"
         --plugin=protoc-gen-grpc="$<TARGET_FILE:gRPC::grpc_cpp_plugin>"
