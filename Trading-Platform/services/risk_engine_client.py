@@ -1,6 +1,7 @@
 import grpc
 from services import trading_pb2, trading_pb2_grpc
-from core.exceptions import RiskEngineUnavailableError
+from core.exceptions import RiskEngineUnavailableError, SymbolNotFoundError
+
 
 
 class RiskEngineClient:
@@ -109,9 +110,12 @@ class RiskEngineClient:
         try:
             response = self.stub.GetPrice(request, timeout = 2)
             return {"symbol": response.symbol, "price": response.price, "updated_at": response.updated_at}
-        except grpc.RpcError:
+        except grpc.RpcError as e:
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                raise SymbolNotFoundError(symbol)
             raise RiskEngineUnavailableError()
-        
+
+                
     def get_all_prices(self) -> dict[str, float]:
         """Fetch current prices for all tracked symbols from the C++ engine.
 
