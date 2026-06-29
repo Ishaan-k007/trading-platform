@@ -1,6 +1,6 @@
 # Trading Platform
 
-A distributed paper trading platform built across independently deployable services — a Python Flask API, a C++ gRPC risk engine, a Kafka event bus, a WebSocket price feed, and a React frontend. Simulates real exchange architecture with in-memory risk checks, live price simulation, and real-time browser updates.
+A distributed paper trading platform built across independently deployable services Python Flask API, a C++ gRPC risk engine, a Kafka event bus, a WebSocket price feed, and a React frontend. Simulates real exchange architecture with in-memory risk checks, live price simulation, and real-time browser updates.
 
 ## Architecture
 
@@ -27,15 +27,15 @@ WebSocket Service         Flask API
 
 ### Why C++
 
-Order risk validation runs in a C++ in-memory engine rather than querying PostgreSQL on every order. This reduces CheckOrder latency from ~8ms (DB round-trip) to ~180μs (RAM lookup) — a 40x improvement. `shared_mutex` allows thousands of concurrent price reads while the GBM thread writes once per second.
+Order risk validation runs in a C++ inmemory engine rather than querying PostgreSQL on every order. This reduces CheckOrder latency from ~8ms (DB roundtrip) to ~180μs (RAM lookup) which is a 40x improvement. `shared_mutex` allows thousands of concurrent price reads while the GBM thread writes once per second.
 
 ### Why Kafka
 
-After a trade fills, Flask publishes a `trade_filled` event to Kafka rather than calling the C++ engine synchronously. The C++ engine and WebSocket service consume independently — decoupling state synchronisation from the HTTP request lifecycle and making each service independently restartable.
+After a trade fills, Flask publishes a `trade_filled` event to Kafka rather than calling the C++ engine synchronously. The C++ engine and WebSocket service consume independently, decoupling state synchronisation from the HTTP request lifecycle and making each service independently restartable.
 
 ### Why WebSockets
 
-GBM produces price updates every second. Without WebSockets, 200 users would generate 200 HTTP polls per second. With WebSockets, one Kafka consumer broadcasts to all 200 connections simultaneously — zero wasted requests.
+GBM produces price updates every second. Without WebSockets, 200 users would generate 200 HTTP polls per second. With WebSockets, one Kafka consumer broadcasts to all 200 connections simultaneously so that there are zero wasted requests.
 
 ---
 
