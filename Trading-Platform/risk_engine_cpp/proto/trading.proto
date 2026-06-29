@@ -1,0 +1,74 @@
+syntax = "proto3";
+package trading;
+
+message PositionEntry {
+    string symbol = 1;
+    double quantity = 2;
+    double average_price = 3;
+
+}
+
+message CheckOrderRequest {
+    int32  user_id     = 1;
+    string order_id    = 2;
+    string symbol      = 3;
+    string side        = 4;
+    string order_type  = 5;
+    double quantity    = 6;
+    double limit_price = 7;
+}
+
+message CheckOrderResponse {
+    bool   approved   = 1;
+    string reason     = 2;
+    double risk_score = 3;
+    double fill_price = 4;
+}
+
+message UpdateStateRequest {
+    int32  user_id           = 1;
+    string symbol            = 2;
+    double new_cash_balance  = 3;
+    double new_quantity      = 4;
+    double new_average_price = 5;
+}
+
+message UpdateStateResponse {
+    bool   success = 1;
+    string message = 2;
+}
+
+message LoadUserRequest {
+    int32  user_id      = 1;
+    double cash_balance = 2;
+    repeated PositionEntry positions = 3;
+}
+
+message LoadUserResponse {
+    bool   success = 1;
+    string message = 2;
+}
+
+message GetPriceRequest {
+    string symbol = 1;
+}
+
+message GetPriceResponse {
+    string symbol     = 1;
+    double price      = 2;
+    string updated_at = 3;
+}
+
+message GetAllPricesRequest {}
+
+message GetAllPricesResponse {
+    map<string, double> prices = 1;
+}
+
+service TradingService {
+    rpc CheckOrder   (CheckOrderRequest)   returns (CheckOrderResponse);
+    rpc UpdateState  (UpdateStateRequest)  returns (UpdateStateResponse);
+    rpc LoadUser     (LoadUserRequest)     returns (LoadUserResponse);
+    rpc GetPrice     (GetPriceRequest)     returns (GetPriceResponse);
+    rpc GetAllPrices (GetAllPricesRequest) returns (GetAllPricesResponse);
+}
