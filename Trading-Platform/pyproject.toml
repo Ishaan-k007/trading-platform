@@ -19,6 +19,8 @@ apscheduler = "^3.10"
 sortedcontainers = "^2.4"
 structlog = "^24.1"
 python-dotenv = "^1.0"
+grpcio = "^1.81.1"
+grpcio-tools = "^1.81.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0"
