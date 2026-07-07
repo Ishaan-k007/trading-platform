@@ -1,3 +1,5 @@
+from urllib import request
+
 import grpc
 from services import trading_pb2, trading_pb2_grpc
 from core.exceptions import RiskEngineUnavailableError, SymbolNotFoundError
@@ -43,7 +45,9 @@ class RiskEngineClient:
             raise RiskEngineUnavailableError()
         
     
-    def update_state(self, user_id: int, symbol: str, new_cash: float, new_quantity: float, new_avg_price: float) -> None:
+    def update_state(self, user_id: int, symbol: str, new_cash: float, new_quantity: float, 
+                 new_avg_price: float, order_id: str, side: str, fill_price: float, 
+                 quantity: float, order_type: str) -> None:
         """Sync the C++ engine's in-memory state after a confirmed fill.
 
         Must be called only after the PostgreSQL transaction has committed,
@@ -61,12 +65,22 @@ class RiskEngineClient:
             RiskEngineUnavailableError: If the C++ engine is unreachable.
         """
         
-        request = trading_pb2.UpdateStateRequest(user_id = user_id, symbol = symbol, new_cash_balance = new_cash, new_quantity = new_quantity, new_average_price = new_avg_price)
-        try:
-            response = self.stub.UpdateState(request, timeout = 2)
-            return
-        except grpc.RpcError:
-            raise RiskEngineUnavailableError()
+        request = trading_pb2.UpdateStateRequest(
+        user_id=user_id,
+        symbol=symbol,
+        new_cash_balance=new_cash,
+        new_quantity=new_quantity,
+        new_average_price=new_avg_price,
+        order_id=order_id,
+        side=side,
+        fill_price=fill_price,
+        quantity=quantity,
+        order_type=order_type,
+    )
+    try:
+        self.stub.UpdateState(request, timeout=2)
+    except grpc.RpcError:
+        raise RiskEngineUnavailableError()
         
         
     def load_user(self, user_id: int, cash_balance: float, positions: list[dict]) -> None:
@@ -130,5 +144,15 @@ class RiskEngineClient:
             response = self.stub.GetAllPrices(request, timeout = 2)
             return dict(response.prices)
 
+        except grpc.RpcError:
+            raise RiskEngineUnavailableError()
+    
+    
+    def has_user(self, user_id: int) -> bool:
+        """Check if user state is already loaded in C++ engine."""
+        request = trading_pb2.HasUserRequest(user_id=user_id)
+        try:
+            response = self.stub.HasUser(request, timeout=2)
+            return response.loaded
         except grpc.RpcError:
             raise RiskEngineUnavailableError()

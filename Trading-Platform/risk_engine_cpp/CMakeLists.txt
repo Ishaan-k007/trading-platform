@@ -29,9 +29,11 @@ set(SOURCES
     src/price_store.cpp
     src/user_state_store.cpp
     src/trading_service.cpp
+    src/wal_writer.cpp
     ${PROTO_SRCS}
     ${GRPC_SRCS}
 )
+
 add_executable(risk_engine ${SOURCES})
 target_include_directories(risk_engine PRIVATE
     "${PROTO_OUT}"

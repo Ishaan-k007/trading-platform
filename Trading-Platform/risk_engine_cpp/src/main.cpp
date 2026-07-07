@@ -10,6 +10,8 @@
 #include "user_state_store.hpp"
 #include "trading_service.hpp"
 #include <ctime>
+#include "wal_writer.hpp"
+
 
 
 
@@ -71,10 +73,11 @@ int main(){
     PQfinish(connection);
     std::cout << "Loaded " << rows << " symbols into PriceStore\n";
     
-
+    WALWriter wal_writer("wal.log");
+   
     std::thread gbm_thread(run_gbm, &price_store);
     gbm_thread.detach();
-    TradingServiceImplementation service(&price_store, &user_store);
+    TradingServiceImplementation service(&price_store, &user_store, &wal_writer);
     grpc::ServerBuilder builder;
     builder.AddListeningPort("0.0.0.0:50051", grpc::InsecureServerCredentials());
     builder.RegisterService(&service);

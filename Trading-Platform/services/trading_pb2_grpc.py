@@ -3,8 +3,7 @@
 import grpc
 import warnings
 
-from services import trading_pb2 as trading__pb2
-
+import trading_pb2 as trading__pb2
 
 GRPC_GENERATED_VERSION = '1.81.1'
 GRPC_VERSION = grpc.__version__
@@ -60,6 +59,11 @@ class TradingServiceStub:
                 request_serializer=trading__pb2.GetAllPricesRequest.SerializeToString,
                 response_deserializer=trading__pb2.GetAllPricesResponse.FromString,
                 _registered_method=True)
+        self.HasUser = channel.unary_unary(
+                '/trading.TradingService/HasUser',
+                request_serializer=trading__pb2.HasUserRequest.SerializeToString,
+                response_deserializer=trading__pb2.HasUserResponse.FromString,
+                _registered_method=True)
 
 
 class TradingServiceServicer:
@@ -95,6 +99,12 @@ class TradingServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def HasUser(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_TradingServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -122,6 +132,11 @@ def add_TradingServiceServicer_to_server(servicer, server):
                     servicer.GetAllPrices,
                     request_deserializer=trading__pb2.GetAllPricesRequest.FromString,
                     response_serializer=trading__pb2.GetAllPricesResponse.SerializeToString,
+            ),
+            'HasUser': grpc.unary_unary_rpc_method_handler(
+                    servicer.HasUser,
+                    request_deserializer=trading__pb2.HasUserRequest.FromString,
+                    response_serializer=trading__pb2.HasUserResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -259,6 +274,33 @@ class TradingService:
             '/trading.TradingService/GetAllPrices',
             trading__pb2.GetAllPricesRequest.SerializeToString,
             trading__pb2.GetAllPricesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def HasUser(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/trading.TradingService/HasUser',
+            trading__pb2.HasUserRequest.SerializeToString,
+            trading__pb2.HasUserResponse.FromString,
             options,
             channel_credentials,
             insecure,
