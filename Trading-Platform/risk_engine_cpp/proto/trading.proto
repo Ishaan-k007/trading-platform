@@ -31,6 +31,11 @@ message UpdateStateRequest {
     double new_cash_balance  = 3;
     double new_quantity      = 4;
     double new_average_price = 5;
+    string order_id   = 6;
+    string side       = 7;
+    double fill_price = 8;
+    double quantity   = 9;
+    string order_type = 10;
 }
 
 message UpdateStateResponse {
@@ -71,4 +76,14 @@ service TradingService {
     rpc LoadUser     (LoadUserRequest)     returns (LoadUserResponse);
     rpc GetPrice     (GetPriceRequest)     returns (GetPriceResponse);
     rpc GetAllPrices (GetAllPricesRequest) returns (GetAllPricesResponse);
+    rpc HasUser (HasUserRequest) returns (HasUserResponse);
+
+}
+
+message HasUserRequest {
+    int32 user_id = 1;
+}
+
+message HasUserResponse {
+    bool loaded = 1;
 }

@@ -1,7 +1,8 @@
 #include "trading_service.hpp"
 
-TradingServiceImplementation::TradingServiceImplementation(PriceStore* price_store, UserStateStore* user_store): price_store(price_store), user_store(user_store)
-{}
+TradingServiceImplementation::TradingServiceImplementation(PriceStore* price_store, UserStateStore* user_store, WALWriter* wal_writer)
+    : price_store(price_store), user_store(user_store), wal_writer(wal_writer)
+{};
 
 grpc::Status TradingServiceImplementation::CheckOrder(grpc::ServerContext* ctx, const trading::CheckOrderRequest* request, trading::CheckOrderResponse* response){
     auto symbol_data = price_store->get_symbol_data(request->symbol());
@@ -47,13 +48,22 @@ grpc::Status TradingServiceImplementation::CheckOrder(grpc::ServerContext* ctx, 
 }
 
 
-grpc::Status TradingServiceImplementation::UpdateState(grpc::ServerContext* ctx, const trading::UpdateStateRequest* request, trading::UpdateStateResponse* response){
-    user_store->update_position(request->user_id(),request->symbol(),request->new_cash_balance(),request->new_quantity(),request->new_average_price());
+grpc::Status TradingServiceImplementation::UpdateState(grpc::ServerContext* ctx, const trading::UpdateStateRequest* request, trading::UpdateStateResponse* response) {
+    user_store->update_position(
+        request->user_id(), request->symbol(),
+        request->new_cash_balance(), request->new_quantity(), request->new_average_price()
+    );
+    wal_writer->write_fill(
+        request->user_id(), request->order_id(), request->symbol(),
+        request->side(), request->order_type(),
+        request->quantity(), request->fill_price(),
+        request->new_cash_balance(), request->new_quantity(), request->new_average_price()
+    );
     response->set_success(true);
     response->set_message("State updated");
-
     return grpc::Status::OK;
 }
+
 
 grpc::Status TradingServiceImplementation::LoadUser(grpc::ServerContext* ctx, const trading::LoadUserRequest* request, trading::LoadUserResponse* response){
     std::vector<std::pair<std::string, PositionState>> positions;
@@ -98,3 +108,9 @@ grpc::Status TradingServiceImplementation::GetAllPrices(grpc::ServerContext* ctx
 
     return grpc::Status::OK;
 }
+
+grpc::Status TradingServiceImplementation::HasUser(grpc::ServerContext* ctx, const trading::HasUserRequest* request, trading::HasUserResponse* response) {
+    response->set_loaded(user_store->has_user(request->user_id()));
+    return grpc::Status::OK;
+}
+
