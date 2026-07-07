@@ -58,3 +58,19 @@ class DuplicateRequestError(TradingError):
 class InvalidCredentialsError(TradingError):
     http_status = 401
     error_code = "INVALID_CREDENTIALS"
+
+class SymbolNotFoundError(TradingError):
+    http_status = 404
+    error_code = "SYMBOL_NOT_FOUND"
+
+    def __init__(self, symbol: str) -> None:
+        super().__init__(f"{symbol} is not a recognised symbol.")
+
+
+class RiskEngineUnavailableError(TradingError):
+    http_status = 503
+    error_code = "RISK_ENGINE_UNAVAILABLE"
+
+    def __init__(self) -> None:
+        super().__init__("Risk engine is currently unavailable.")
+
