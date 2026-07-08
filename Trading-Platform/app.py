@@ -5,7 +5,11 @@ from core.middleware import register_error_handlers
 from services.risk_engine_client import RiskEngineClient
 from routes.market_routes import market_bp
 from routes.auth_routes import auth_bp
+from services.order_service import OrderService
 from models import user, account, order, position, ledger_entry, market_price, risk_check
+from routes.order_routes import order_bp
+
+
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
@@ -22,13 +26,13 @@ def create_app():
    
     app.register_blueprint(auth_bp, url_prefix="/api/v1/auth")
     app.register_blueprint(market_bp, url_prefix="/api/v1/market")
-    
+    app.register_blueprint(order_bp, url_prefix="/api/v1/orders")
     
     # Register error handlers
     register_error_handlers(app)
 
     app.risk_engine = RiskEngineClient(app.config["RISK_ENGINE_HOST"],app.config["RISK_ENGINE_PORT"])
-    
+    app.order_service = OrderService(app.risk_engine)
     
     
     

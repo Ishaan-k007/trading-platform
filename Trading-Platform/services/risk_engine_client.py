@@ -66,21 +66,21 @@ class RiskEngineClient:
         """
         
         request = trading_pb2.UpdateStateRequest(
-        user_id=user_id,
-        symbol=symbol,
-        new_cash_balance=new_cash,
-        new_quantity=new_quantity,
-        new_average_price=new_avg_price,
-        order_id=order_id,
-        side=side,
-        fill_price=fill_price,
-        quantity=quantity,
-        order_type=order_type,
-    )
-    try:
-        self.stub.UpdateState(request, timeout=2)
-    except grpc.RpcError:
-        raise RiskEngineUnavailableError()
+            user_id=user_id,
+            symbol=symbol,
+            new_cash_balance=new_cash,
+            new_quantity=new_quantity,
+            new_average_price=new_avg_price,
+            order_id=order_id,
+            side=side,
+            fill_price=fill_price,
+            quantity=quantity,
+            order_type=order_type,
+        )
+        try:
+            self.stub.UpdateState(request, timeout=2)
+        except grpc.RpcError:
+            raise RiskEngineUnavailableError()
         
         
     def load_user(self, user_id: int, cash_balance: float, positions: list[dict]) -> None:
