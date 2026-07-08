@@ -1263,6 +1263,25 @@ MarkupSafe = ">=2.0"
 i18n = ["Babel (>=2.7)"]
 
 [[package]]
+name = "kafka-python-ng"
+version = "2.2.3"
+description = "Pure Python client for Apache Kafka"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "kafka_python_ng-2.2.3-py2.py3-none-any.whl", hash = "sha256:adc6e82147c441ca4ae1f22e291fc08efab0d10971cbd4aa1481d2ffa38e9480"},
+    {file = "kafka_python_ng-2.2.3.tar.gz", hash = "sha256:f79f28e10ade9b5a9860b2ec15b7cc8dc510d5702f5a399430478cff5f93a05a"},
+]
+
+[package.extras]
+boto = ["botocore"]
+crc32c = ["crc32c"]
+lz4 = ["lz4"]
+snappy = ["python-snappy"]
+zstd = ["zstandard"]
+
+[[package]]
 name = "librt"
 version = "0.11.0"
 description = "Mypyc runtime library"
@@ -2746,4 +2765,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "7293448c3536338a69611890c8e49a3878a76b98118f6c8b1b84580265eef6e3"
+content-hash = "eb81b7754885a37efdfdcfdaaf3dc62ecff8b211eaa8a1a43e086be115834319"
