@@ -15,3 +15,4 @@ class Config:
     JWT_REFRESH_TOKEN_EXPIRES = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRES", 604800))
     RISK_ENGINE_HOST = os.getenv("RISK_ENGINE_HOST", "localhost")
     RISK_ENGINE_PORT = int(os.getenv("RISK_ENGINE_PORT", 50051))
+    WAL_PATH = os.getenv("WAL_PATH", "wal.log")
