@@ -1,7 +1,6 @@
 #include "trading_service.hpp"
-
-TradingServiceImplementation::TradingServiceImplementation(PriceStore* price_store, UserStateStore* user_store, WALWriter* wal_writer)
-    : price_store(price_store), user_store(user_store), wal_writer(wal_writer)
+TradingServiceImplementation::TradingServiceImplementation(PriceStore* price_store, UserStateStore* user_store, WALWriter* wal_writer , OrderBook* order_book)
+    : price_store(price_store), user_store(user_store), wal_writer(wal_writer), order_book(order_book)
 {};
 
 grpc::Status TradingServiceImplementation::CheckOrder(grpc::ServerContext* ctx, const trading::CheckOrderRequest* request, trading::CheckOrderResponse* response){
@@ -111,6 +110,29 @@ grpc::Status TradingServiceImplementation::GetAllPrices(grpc::ServerContext* ctx
 
 grpc::Status TradingServiceImplementation::HasUser(grpc::ServerContext* ctx, const trading::HasUserRequest* request, trading::HasUserResponse* response) {
     response->set_loaded(user_store->has_user(request->user_id()));
+    return grpc::Status::OK;
+}
+
+grpc::Status TradingServiceImplementation::UpdateOrderBook(grpc::ServerContext* ctx, const trading::OrderBookUpdateRequest* request, trading::OrderBookUpdateResponse* response) {
+    std::vector<PriceLevel> bids;
+    for (const auto& level : request->bids()) {
+        PriceLevel l;
+        l.price = level.price();
+        l.quantity = level.quantity();
+        bids.push_back(l);
+    }
+
+    std::vector<PriceLevel> asks;
+    for (const auto& level : request->asks()) {
+        PriceLevel l;
+        l.price = level.price();
+        l.quantity = level.quantity();
+        asks.push_back(l);
+    }
+
+    order_book->update(request->symbol(), bids, asks, request->updated_at());
+
+    response->set_success(true);
     return grpc::Status::OK;
 }
 

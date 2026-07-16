@@ -64,6 +64,11 @@ class TradingServiceStub:
                 request_serializer=trading__pb2.HasUserRequest.SerializeToString,
                 response_deserializer=trading__pb2.HasUserResponse.FromString,
                 _registered_method=True)
+        self.UpdateOrderBook = channel.unary_unary(
+                '/trading.TradingService/UpdateOrderBook',
+                request_serializer=trading__pb2.OrderBookUpdateRequest.SerializeToString,
+                response_deserializer=trading__pb2.OrderBookUpdateResponse.FromString,
+                _registered_method=True)
 
 
 class TradingServiceServicer:
@@ -105,6 +110,12 @@ class TradingServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def UpdateOrderBook(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_TradingServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -137,6 +148,11 @@ def add_TradingServiceServicer_to_server(servicer, server):
                     servicer.HasUser,
                     request_deserializer=trading__pb2.HasUserRequest.FromString,
                     response_serializer=trading__pb2.HasUserResponse.SerializeToString,
+            ),
+            'UpdateOrderBook': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateOrderBook,
+                    request_deserializer=trading__pb2.OrderBookUpdateRequest.FromString,
+                    response_serializer=trading__pb2.OrderBookUpdateResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -301,6 +317,33 @@ class TradingService:
             '/trading.TradingService/HasUser',
             trading__pb2.HasUserRequest.SerializeToString,
             trading__pb2.HasUserResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateOrderBook(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/trading.TradingService/UpdateOrderBook',
+            trading__pb2.OrderBookUpdateRequest.SerializeToString,
+            trading__pb2.OrderBookUpdateResponse.FromString,
             options,
             channel_credentials,
             insecure,

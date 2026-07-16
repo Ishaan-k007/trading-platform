@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>trading.proto Reference</title>
+<style>
+  body { font-family: Georgia, serif; max-width: 900px; margin: 40px auto; padding: 0 40px; color: #1a1a1a; line-height: 1.7; }
+  h1 { font-size: 2em; border-bottom: 3px solid #1a1a1a; padding-bottom: 10px; margin-top: 60px; }
+  h2 { font-size: 1.4em; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-top: 40px; color: #2c2c2c; }
+  h3 { font-size: 1.1em; margin-top: 30px; color: #333; }
+  code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: 'Courier New', monospace; font-size: 0.9em; }
+  pre { background: #f4f4f4; padding: 16px; border-radius: 5px; overflow-x: auto; border-left: 4px solid #555; font-family: 'Courier New', monospace; font-size: 0.85em; line-height: 1.5; }
+  table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+  th { background: #1a1a1a; color: white; padding: 10px 14px; text-align: left; }
+  td { padding: 9px 14px; border-bottom: 1px solid #ddd; }
+  tr:nth-child(even) td { background: #f9f9f9; }
+  .warning { background: #fff3cd; border-left: 4px solid #f0ad4e; padding: 12px 16px; margin: 16px 0; border-radius: 3px; }
+  .correct { background: #d4edda; border-left: 4px solid #28a745; padding: 12px 16px; margin: 16px 0; border-radius: 3px; }
+  .pending { background: #e2e3f0; border-left: 4px solid #6f42c1; padding: 12px 16px; margin: 16px 0; border-radius: 3px; }
+  .section-label { display: inline-block; background: #1a1a1a; color: white; font-size: 0.75em; padding: 2px 8px; border-radius: 3px; margin-bottom: 8px; letter-spacing: 1px; text-transform: uppercase; }
+  @media print { body { margin: 20px; } h1 { page-break-before: always; } h1:first-of-type { page-break-before: avoid; } }
+</style>
+</head>
+<body>
+
+<h1 style="margin-top:0; border-bottom: 3px solid #1a1a1a;">trading.proto — Complete Reference</h1>
+<p style="color:#666; font-size:0.9em;">Trading Platform — gRPC Contract Between Flask/Python and the C++ Engine &nbsp;|&nbsp; Date: 2026-07-15</p>
+
+<!-- ================================================================ -->
+<h1>Part 1: What This File Is, In Plain English</h1>
+
+<p><code>trading.proto</code> is not code that runs. It is a shared vocabulary — a description of the exact shape data must have whenever Python (Flask, the Binance feed handler) and C++ (<code>risk_engine.exe</code>) exchange information. Python and C++ are two completely separate programs that never share memory; the only way they can talk to each other is by agreeing in advance, in writing, on what a message looks like. This file is that agreement.</p>
+
+<p>Both sides run this same file through the protobuf compiler (<code>protoc</code>) and get real, usable code generated from it — actual classes in Python (<code>services/trading_pb2.py</code>) and actual classes in C++ (generated into the CMake build directory). Because both sides generate their code from the identical source file, it is structurally impossible for them to disagree about what a message contains.</p>
+
+<h2>The building blocks used throughout this file</h2>
+
+<table>
+<tr><th>Concept</th><th>What it means</th></tr>
+<tr><td><code>message</code></td><td>Declares a data structure — like defining a small class with only these fields and nothing else.</td></tr>
+<tr><td><code>= 1</code>, <code>= 2</code>, ...</td><td>Not a default value or array index. A permanent <strong>field tag</strong> — an ID number protobuf uses on the wire instead of sending the field name as text every time. Scoped per-message: message A's field <code>1</code> and message B's field <code>1</code> are unrelated. This is part of why protobuf is smaller and faster than JSON.</td></tr>
+<tr><td><code>repeated</code></td><td>Means "a list of," not a single value. A <code>repeated PriceLevel</code> field becomes a list-like object on both sides that you can iterate or append to.</td></tr>
+<tr><td><code>service</code> / <code>rpc</code></td><td>Declares a remote procedure — a function one process can call on another process over the network. Each <code>rpc</code> line names exactly one request message type and one response message type.</td></tr>
+<tr><td>Request / Response pair</td><td>The standard shape for every RPC in this file: one message travels <em>out</em> to the callee, a different message travels <em>back</em>. Same pattern as a function's arguments and its return value, just over a network instead of in-process.</td></tr>
+</table>
+
+<div class="warning"><strong>Every RPC in this file is unary</strong> — one request, one response, no streaming. This matches the actual traffic pattern needed: even the highest-volume RPC (<code>UpdateOrderBook</code>, at full symbol-universe scale) is on the order of a few thousand calls/second, which a plain unary call over an already-open gRPC connection handles comfortably. Streaming RPCs exist in gRPC but were deliberately not used here — they solve a different problem (very high-frequency continuous push, or client-finishes-then-gets-one-summary) that doesn't apply to any current use case.</div>
+
+<!-- ================================================================ -->
+<h1>Part 2: Shared Building Blocks</h1>
+
+<h2>PositionEntry</h2>
+<p class="section-label">Used inside LoadUserRequest</p>
+<p>Represents one holding a user has in one symbol — not sent on its own, only ever as part of a list inside a bigger message.</p>
+<table>
+<tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
+<tr><td><code>symbol</code></td><td>string</td><td>Ticker, e.g. <code>"AAPL"</code></td></tr>
+<tr><td><code>quantity</code></td><td>double</td><td>How many shares/units are held</td></tr>
+<tr><td><code>average_price</code></td><td>double</td><td>Average cost basis for this position</td></tr>
+</table>
+<pre>Example instance: { symbol: "AAPL", quantity: 10, average_price: 182.50 }</pre>
+
+<h2>PriceLevel</h2>
+<p class="section-label">Used inside OrderBookUpdateRequest</p>
+<p>Represents one row of an order book: at this price, this much quantity is resting. Like <code>PositionEntry</code>, it is a building block — never sent alone, always as part of a <code>repeated</code> list.</p>
+<table>
+<tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
+<tr><td><code>price</code></td><td>double</td><td>The price at this level</td></tr>
+<tr><td><code>quantity</code></td><td>double</td><td>Total quantity resting at that price</td></tr>
+</table>
+<pre>Example instance: { price: 67200.50, quantity: 0.42 }
+  — meaning: someone has an order for 0.42 BTC at $67,200.50</pre>
+
+<!-- ================================================================ -->
+<h1>Part 3: Every RPC, In Detail</h1>
+
+<h2>1. CheckOrder</h2>
+<p class="section-label">Called by: Flask (order_service.py) &nbsp;→&nbsp; Answered by: C++ risk engine</p>
+<p><strong>What it's for:</strong> Before any trade is allowed to happen, Flask asks the C++ engine "can this user actually do this?" — checking funds for a BUY or held quantity for a SELL — entirely from in-memory state, no database round trip. This is the risk-check step of the order pipeline.</p>
+<h3>CheckOrderRequest</h3>
+<table>
+<tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
+<tr><td><code>user_id</code></td><td>int32</td><td>Who is placing the order</td></tr>
+<tr><td><code>order_id</code></td><td>string</td><td>Client-supplied unique ID (idempotency)</td></tr>
+<tr><td><code>symbol</code></td><td>string</td><td>What's being traded</td></tr>
+<tr><td><code>side</code></td><td>string</td><td><code>"BUY"</code> or <code>"SELL"</code></td></tr>
+<tr><td><code>order_type</code></td><td>string</td><td><code>"MARKET"</code> or <code>"LIMIT"</code></td></tr>
+<tr><td><code>quantity</code></td><td>double</td><td>How much to trade</td></tr>
+<tr><td><code>limit_price</code></td><td>double</td><td>Only meaningful for LIMIT orders</td></tr>
+</table>
+<h3>CheckOrderResponse</h3>
+<table>
+<tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
+<tr><td><code>approved</code></td><td>bool</td><td>Can this order proceed?</td></tr>
+<tr><td><code>reason</code></td><td>string</td><td>Why it was rejected, if it was</td></tr>
+<tr><td><code>risk_score</code></td><td>double</td><td>Internal risk metric</td></tr>
+<tr><td><code>fill_price</code></td><td>double</td><td>The price the order would fill at if approved</td></tr>
+</table>
+<p><strong>Connects to:</strong> If <code>approved</code> is true, Flask immediately calls <code>UpdateState</code> to actually apply the trade. If false, <code>order_service.py</code> raises <code>InsufficientFundsError</code> or <code>InsufficientPositionError</code> using the returned <code>reason</code>/<code>fill_price</code>.</p>
+
+<h2>2. UpdateState</h2>
+<p class="section-label">Called by: Flask, immediately after an approved CheckOrder</p>
+<p><strong>What it's for:</strong> Commits an approved trade into the engine's in-memory state (new cash balance, new position) and writes a Write-Ahead-Log entry — this is the only place a trade becomes "real" inside the engine. No PostgreSQL write happens here or anywhere in this path; persistence happens later, asynchronously, via the WAL → Kafka → <code>fill_consumer.py</code> pipeline.</p>
+<h3>UpdateStateRequest</h3>
+<table>
+<tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
+<tr><td><code>user_id</code></td><td>int32</td><td>Whose state to update</td></tr>
+<tr><td><code>symbol</code></td><td>string</td><td>Which symbol was traded</td></tr>
+<tr><td><code>new_cash_balance</code></td><td>double</td><td>Cash balance after this fill</td></tr>
+<tr><td><code>new_quantity</code></td><td>double</td><td>Position size after this fill</td></tr>
+<tr><td><code>new_average_price</code></td><td>double</td><td>Updated cost basis</td></tr>
+<tr><td><code>order_id</code>, <code>side</code>, <code>fill_price</code>, <code>quantity</code>, <code>order_type</code></td><td>mixed</td><td>Full fill details — included so the WAL entry written from this call is complete on its own, without needing to look anything else up</td></tr>
+</table>
+<h3>UpdateStateResponse</h3>
+<table>
+<tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
+<tr><td><code>success</code></td><td>bool</td><td>Did the update apply</td></tr>
+<tr><td><code>message</code></td><td>string</td><td>Human-readable detail</td></tr>
+</table>
+<p><strong>Connects to:</strong> the WAL entry written here is later read by <code>pipeline/wal_producer.py</code> and published to Kafka's <code>order-fills</code> topic, eventually landing in PostgreSQL via <code>pipeline/fill_consumer.py</code>.</p>
+
+<h2>3. LoadUser</h2>
+<p class="section-label">Called by: Flask, only the first time a user is seen</p>
+<p><strong>What it's for:</strong> The C++ engine holds trading state in RAM, not the database — but RAM is empty on startup. The first time a given user places an order, Flask reads their current cash and positions out of PostgreSQL and hands them to the engine once, so every subsequent order for that user is answered from memory with no DB read.</p>
+<h3>LoadUserRequest</h3>
+<table>
+<tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
+<tr><td><code>user_id</code></td><td>int32</td><td>Who to load</td></tr>
+<tr><td><code>cash_balance</code></td><td>double</td><td>Starting cash, from the <code>accounts</code> table</td></tr>
+<tr><td><code>positions</code></td><td>repeated <code>PositionEntry</code></td><td>All current holdings, from the <code>positions</code> table</td></tr>
+</table>
+<h3>LoadUserResponse</h3>
+<table>
+<tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
+<tr><td><code>success</code></td><td>bool</td><td>Did the load apply</td></tr>
+<tr><td><code>message</code></td><td>string</td><td>Human-readable detail</td></tr>
+</table>
+<p><strong>Connects to:</strong> gated by <code>HasUser</code> (below) — Flask always checks <code>HasUser</code> first and only calls <code>LoadUser</code> if the answer is no. This pair together is the "write-through cache" pattern.</p>
+
+<h2>4. HasUser</h2>
+<p class="section-label">Called by: Flask, before every order, to decide whether LoadUser is needed</p>
+<p><strong>What it's for:</strong> A cheap yes/no check — "is this user already sitting in your memory?" Exists purely to avoid an unnecessary PostgreSQL read on every single order; only the very first order for a given user pays that cost.</p>
+<h3>HasUserRequest</h3>
+<table><tr><th>Field</th><th>Type</th><th>Meaning</th></tr><tr><td><code>user_id</code></td><td>int32</td><td>Who to check</td></tr></table>
+<h3>HasUserResponse</h3>
+<table><tr><th>Field</th><th>Type</th><th>Meaning</th></tr><tr><td><code>loaded</code></td><td>bool</td><td>True if already in memory</td></tr></table>
+
+<h2>5. GetPrice</h2>
+<p class="section-label">Called by: Flask market_routes.py (GET /prices/&lt;symbol&gt;), and internally by order_service.py</p>
+<p><strong>What it's for:</strong> Returns the current price the engine is using for one symbol. Today this is a GBM-simulated price; from Stage 3 onward it will read from the real order book instead — this RPC's shape doesn't need to change for that, only what's behind it inside the engine.</p>
+<h3>GetPriceRequest</h3>
+<table><tr><th>Field</th><th>Type</th><th>Meaning</th></tr><tr><td><code>symbol</code></td><td>string</td><td>Which symbol</td></tr></table>
+<h3>GetPriceResponse</h3>
+<table>
+<tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
+<tr><td><code>symbol</code></td><td>string</td><td>Echoed back</td></tr>
+<tr><td><code>price</code></td><td>double</td><td>Current price</td></tr>
+<tr><td><code>updated_at</code></td><td>string</td><td>Timestamp of the last update</td></tr>
+</table>
+<div class="warning">If the symbol was never seeded into the engine, this RPC returns a gRPC <code>NOT_FOUND</code> status, which <code>risk_engine_client.py</code> turns into a <code>SymbolNotFoundError</code> — this is the exact mechanism that currently blocks trading on any symbol the engine hasn't been told about in advance. Relevant once real Binance symbols (hundreds of them) start arriving — see the <code>UpdateOrderBook</code> section below.</div>
+
+<h2>6. GetAllPrices</h2>
+<p class="section-label">Called by: Flask market_routes.py (GET /prices)</p>
+<p><strong>What it's for:</strong> Same idea as <code>GetPrice</code>, but for every symbol at once — powers the "all current prices" market data endpoint.</p>
+<h3>GetAllPricesRequest</h3>
+<p>Empty — no input needed, it's "give me everything you have."</p>
+<h3>GetAllPricesResponse</h3>
+<table><tr><th>Field</th><th>Type</th><th>Meaning</th></tr><tr><td><code>prices</code></td><td>map&lt;string, double&gt;</td><td>Symbol → current price, for every symbol the engine knows about</td></tr></table>
+
+<h2>7. UpdateOrderBook <span style="font-weight:normal; font-size:0.7em; color:#6f42c1;">(new — Stage 1)</span></h2>
+<p class="section-label">Called by: the Binance feed handler (pipeline/binance_feed_producer.py), once per depth snapshot</p>
+<p><strong>What it's for:</strong> Delivers one real order book snapshot for one symbol — Binance's top-20 bid/ask levels — from the Python feed handler into the C++ engine's memory, replacing the fake GBM-simulated price with real market data.</p>
+<h3>OrderBookUpdateRequest</h3>
+<table>
+<tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
+<tr><td><code>symbol</code></td><td>string</td><td>Which trading pair this snapshot is for, e.g. <code>"BTCUSDT"</code></td></tr>
+<tr><td><code>bids</code></td><td>repeated <code>PriceLevel</code></td><td>Up to 20 buy-side levels, best-to-worst</td></tr>
+<tr><td><code>asks</code></td><td>repeated <code>PriceLevel</code></td><td>Up to 20 sell-side levels, best-to-worst</td></tr>
+<tr><td><code>updated_at</code></td><td>string</td><td>Timestamp of this snapshot</td></tr>
+</table>
+<h3>OrderBookUpdateResponse</h3>
+<table><tr><th>Field</th><th>Type</th><th>Meaning</th></tr><tr><td><code>success</code></td><td>bool</td><td>Did the update apply</td></tr></table>
+
+<pre>Example instance sent for one BTCUSDT tick:
+
+OrderBookUpdateRequest {
+  symbol: "BTCUSDT"
+  bids: [ {price: 67200.50, quantity: 0.42}, {price: 67199.00, quantity: 1.10}, ... up to 20 ]
+  asks: [ {price: 67201.00, quantity: 0.30}, {price: 67202.50, quantity: 0.85}, ... up to 20 ]
+  updated_at: "2026-07-15T14:02:31Z"
+}</pre>
+
+<div class="pending"><strong>Status: contract defined, handler not yet written.</strong> The <code>.proto</code> definition above exists and Python's generated stubs are ready to use it, but there is no C++ function implementing <code>UpdateOrderBook</code> yet, and no <code>OrderBook</code> store to hold the data it delivers (Stage 2). Because the stream used is Binance's <em>partial-depth snapshot</em> (not diff-depth), each incoming message is a complete, self-contained picture — the eventual handler only needs to <em>replace</em> whatever it's holding for that symbol, never merge or reconcile against previous state.</div>
+
+<div class="warning"><strong>Auto-registration requirement:</strong> unlike <code>PriceStore</code> (which requires a symbol to be pre-seeded from the <code>market_prices</code> table before <code>GetPrice</code>/<code>set_price</code> will do anything for it), the new <code>OrderBook</code> store must create an entry for a symbol the first time <code>UpdateOrderBook</code> is called for it. At target scale (300+ live Binance symbols), nobody is hand-inserting hundreds of rows into Postgres to unlock trading — the real order book data itself is the registration.</div>
+
+<!-- ================================================================ -->
+<h1>Part 4: How The RPCs Fit Together — End to End</h1>
+
+<h2>Order placement flow</h2>
+<pre>Flask receives POST /orders
+   → HasUser?           (cheap check: is this user already in memory?)
+       → no  → LoadUser  (one-time: pull cash + positions from Postgres)
+   → CheckOrder          (can they afford / do they hold enough?)
+       → approved? → UpdateState   (commit the fill, write WAL entry)
+                   → (async, off this path) WAL → Kafka → Postgres</pre>
+
+<h2>Market data flow</h2>
+<pre>Browser / researcher hits GET /prices or GET /prices/&lt;symbol&gt;
+   → Flask calls GetAllPrices or GetPrice
+   → today: reads the GBM-simulated PriceStore
+   → after Stage 3: reads the real OrderBook store instead — same RPCs, different data source underneath</pre>
+
+<h2>Real market data ingestion flow (Stage 1, in progress)</h2>
+<pre>Binance WebSocket (partial-depth stream, sharded across multiple connections)
+   → Python feed handler parses the JSON snapshot
+   → builds an OrderBookUpdateRequest
+   → calls UpdateOrderBook over gRPC
+   → [not yet built] C++ handler stores it in the OrderBook class (Stage 2)
+   → [not yet built] GetPrice / a future signals RPC reads real data from there</pre>
+
+<h2>Summary table</h2>
+<table>
+<tr><th>RPC</th><th>Caller</th><th>Purpose</th><th>Status</th></tr>
+<tr><td>CheckOrder</td><td>Flask</td><td>Risk check before a trade</td><td>Implemented</td></tr>
+<tr><td>UpdateState</td><td>Flask</td><td>Commit an approved trade</td><td>Implemented</td></tr>
+<tr><td>LoadUser</td><td>Flask</td><td>Seed a user into memory</td><td>Implemented</td></tr>
+<tr><td>HasUser</td><td>Flask</td><td>Check if a user is already in memory</td><td>Implemented</td></tr>
+<tr><td>GetPrice</td><td>Flask</td><td>Read one symbol's current price</td><td>Implemented (GBM-backed)</td></tr>
+<tr><td>GetAllPrices</td><td>Flask</td><td>Read every symbol's current price</td><td>Implemented (GBM-backed)</td></tr>
+<tr><td>UpdateOrderBook</td><td>Binance feed handler</td><td>Deliver a real order book snapshot</td><td>Contract only — handler pending (Stage 2)</td></tr>
+</table>
+
+</body>
+</html>

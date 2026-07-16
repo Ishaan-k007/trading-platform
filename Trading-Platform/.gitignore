@@ -33,3 +33,6 @@ Thumbs.db
 
 # Poetry
 # poetry.lock is intentionally kept (pin exact deps for reproducibility)
+
+# Generated docs (HTML source is tracked, rendered PDF is not)
+risk_engine_cpp/docs/trading_proto_reference.pdf
