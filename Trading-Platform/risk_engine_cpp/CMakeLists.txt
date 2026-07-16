@@ -30,6 +30,7 @@ set(SOURCES
     src/user_state_store.cpp
     src/trading_service.cpp
     src/wal_writer.cpp
+    src/order_book.cpp
     ${PROTO_SRCS}
     ${GRPC_SRCS}
 )

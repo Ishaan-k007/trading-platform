@@ -11,7 +11,8 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
     KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "order-fills")
-
+    KAFKA_MARKET_TOPIC = os.getenv("KAFKA_MARKET_TOPIC", "market-ticks")
+    
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-change-in-production")
     JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRES", 900))
     JWT_REFRESH_TOKEN_EXPIRES = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRES", 604800))

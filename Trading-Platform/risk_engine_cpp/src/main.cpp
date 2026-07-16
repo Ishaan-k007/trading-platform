@@ -11,6 +11,7 @@
 #include "trading_service.hpp"
 #include <ctime>
 #include "wal_writer.hpp"
+#include "order_book.hpp"
 
 
 
@@ -52,6 +53,7 @@ int main(){
 
     PriceStore price_store;
     UserStateStore user_store;
+    OrderBook order_book;
 
     PGresult* res = PQexec(connection, "SELECT symbol, price, volatility, drift FROM market_prices");
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
@@ -75,9 +77,11 @@ int main(){
     
     WALWriter wal_writer("wal.log");
    
-    std::thread gbm_thread(run_gbm, &price_store);
-    gbm_thread.detach();
-    TradingServiceImplementation service(&price_store, &user_store, &wal_writer);
+    // GBM simulation disconnected for now - real Binance order book data drives pricing instead.
+    // Uncomment to re-enable GBM-simulated pricing for symbols not covered by live order book data.
+    // std::thread gbm_thread(run_gbm, &price_store);
+    // gbm_thread.detach();
+    TradingServiceImplementation service(&price_store, &user_store, &wal_writer, &order_book);
     grpc::ServerBuilder builder;
     builder.AddListeningPort("0.0.0.0:50051", grpc::InsecureServerCredentials());
     builder.RegisterService(&service);

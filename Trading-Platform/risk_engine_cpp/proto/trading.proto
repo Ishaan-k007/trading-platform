@@ -70,6 +70,22 @@ message GetAllPricesResponse {
     map<string, double> prices = 1;
 }
 
+message PriceLevel {
+    double price    = 1;
+    double quantity = 2;
+}
+
+message OrderBookUpdateRequest {
+    string symbol            = 1;
+    repeated PriceLevel bids = 2;
+    repeated PriceLevel asks = 3;
+    string updated_at        = 4;
+}
+
+message OrderBookUpdateResponse {
+    bool success = 1;
+}
+
 service TradingService {
     rpc CheckOrder   (CheckOrderRequest)   returns (CheckOrderResponse);
     rpc UpdateState  (UpdateStateRequest)  returns (UpdateStateResponse);
@@ -77,6 +93,7 @@ service TradingService {
     rpc GetPrice     (GetPriceRequest)     returns (GetPriceResponse);
     rpc GetAllPrices (GetAllPricesRequest) returns (GetAllPricesResponse);
     rpc HasUser (HasUserRequest) returns (HasUserResponse);
+    rpc UpdateOrderBook (OrderBookUpdateRequest) returns (OrderBookUpdateResponse);
 
 }
 
