@@ -64,6 +64,17 @@ std::optional<double> OrderBook::best_ask(const std::string& symbol) const {
     return it->second.asks.front().price;
 }
 
+std::optional<std::string> OrderBook::updated_at(const std::string& symbol) const {
+    std::unique_lock<std::mutex> entry_lock;
+    std::shared_lock lock{books_mutex};
+    auto it = books.find(symbol);
+    if (it == books.end()) {
+        return std::nullopt;
+    }
+    entry_lock = std::unique_lock<std::mutex>(*it->second.lock);
+    return it->second.updated_at;
+}
+
 std::optional<double> OrderBook::spread(const std::string& symbol) const {
     auto bid = best_bid(symbol);
     auto ask = best_ask(symbol);

@@ -4,6 +4,9 @@
 void UserStateStore::load_user(int user_id, double cash, const std::vector<std::pair<std::string, PositionState>>& positions) {
     std::unique_lock lock{user_positions_mutex};
 
+    if (user_positions.find(user_id) != user_positions.end()) {
+        return;
+    }
     UserState state;
     state.cash = cash;
     state.lock =  std::make_unique<std::mutex>();
@@ -29,11 +32,11 @@ void UserStateStore::load_user(int user_id, double cash, const std::vector<std::
 
  }
 
-bool UserStateStore::check_and_reserve_position(int user_id, const std::string& side, const std::string& symbol, double quantity, double price){
+ReservationResult UserStateStore::check_and_reserve_position(int user_id, const std::string& side, const std::string& symbol, double quantity, double price){
     std::shared_lock lock{user_positions_mutex};
 
     if (user_positions.find(user_id) == user_positions.end()) {
-        return false;
+        return {false, 0, 0, 0};
     }
     
     UserState& user = user_positions[user_id];
@@ -44,23 +47,26 @@ bool UserStateStore::check_and_reserve_position(int user_id, const std::string& 
     if (side == "BUY") {
         if (user.cash >= quantity * price) {
             user.cash = user.cash - quantity * price;
-            return true;
+            user.positions[symbol].quantity = user.positions[symbol].quantity + quantity;
+            user.positions[symbol].average_price = (user.positions[symbol].average_price * (user.positions[symbol].quantity - quantity) + price * quantity) / user.positions[symbol].quantity;
+            return {true, user.cash, user.positions[symbol].quantity, user.positions[symbol].average_price};
         }
         else {
-            return false;
+            return {false, user.cash, user.positions[symbol].quantity, user.positions[symbol].average_price};
         }
     }
 
     if (side == "SELL") {
         if (user.positions[symbol].quantity >= quantity) {
+            user.cash = user.cash + quantity * price;
             user.positions[symbol].quantity = user.positions[symbol].quantity - quantity;
-            return true;
+            return {true, user.cash, user.positions[symbol].quantity, user.positions[symbol].average_price};
         }
         else {
-            return false;
+            return {false, user.cash, user.positions[symbol].quantity, user.positions[symbol].average_price};
         }
     }
-    return false;
+    return {false, user.cash, user.positions[symbol].quantity, user.positions[symbol].average_price};
 }
 
 
@@ -77,5 +83,4 @@ void UserStateStore::update_position(int user_id, const std::string& symbol, dou
     user.positions[symbol].average_price = new_average_price;
 
 }
-
 

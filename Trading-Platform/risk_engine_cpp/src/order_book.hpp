@@ -28,6 +28,8 @@ class OrderBook {
 
         std::optional<double> best_ask(const std::string& symbol) const;
 
+        std::optional<std::string> updated_at(const std::string& symbol) const;
+
         std::optional<double> spread(const std::string& symbol) const;
 
         std::optional<double> imbalance(const std::string& symbol) const;
