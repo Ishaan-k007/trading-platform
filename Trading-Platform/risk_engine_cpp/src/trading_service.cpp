@@ -64,10 +64,6 @@ grpc::Status TradingServiceImplementation::CheckOrder(grpc::ServerContext* ctx, 
 
 
 grpc::Status TradingServiceImplementation::UpdateState(grpc::ServerContext* ctx, const trading::UpdateStateRequest* request, trading::UpdateStateResponse* response) {
-    user_store->update_position(
-        request->user_id(), request->symbol(),
-        request->new_cash_balance(), request->new_quantity(), request->new_average_price()
-    );
     wal_writer->write_fill(
         request->user_id(), request->order_id(), request->symbol(),
         request->side(), request->order_type(),
