@@ -23,6 +23,9 @@ message CheckOrderResponse {
     string reason     = 2;
     double risk_score = 3;
     double fill_price = 4;
+    double new_cash_balance = 5;
+    double new_average_price = 6;
+    double new_quantity = 7;
 }
 
 message UpdateStateRequest {
@@ -62,6 +65,8 @@ message GetPriceResponse {
     string symbol     = 1;
     double price      = 2;
     string updated_at = 3;
+    double best_bid   = 4;
+    double best_ask   = 5;
 }
 
 message GetAllPricesRequest {}

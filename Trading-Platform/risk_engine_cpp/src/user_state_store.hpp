@@ -21,13 +21,20 @@ struct UserState {
 
 };
 
+struct ReservationResult {
+    bool success;
+    double new_cash;
+    double new_quantity;
+    double new_average_price;
+};
+
 class UserStateStore {
     public:
         void load_user(int user_id, double cash, const std::vector<std::pair<std::string, PositionState>>& positions);
         bool has_user(int user_id);
 
 
-        bool check_and_reserve_position(int user_id, const std::string& side, const std::string& symbol, double quantity, double price);
+        ReservationResult check_and_reserve_position(int user_id, const std::string& side, const std::string& symbol, double quantity, double price);
 
         void update_position(int user_id, const std::string& symbol, double new_cash, double new_quantity, double new_average_price);
 

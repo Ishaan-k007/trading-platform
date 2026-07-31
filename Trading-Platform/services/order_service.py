@@ -73,12 +73,12 @@ class OrderService:
 
 
         order = Order(id=str(uuid.uuid4()), user_id=user_id, symbol=symbol, side=side, order_type=order_type, quantity=quantity, limit_price=limit_price, status=OrderStatus.PENDING)
-        self._execute_fill(user_id, order, result["fill_price"])
+        self._execute_fill(user_id, order, result["fill_price"] , result["new_cash_balance"], result["new_quantity"], result["new_average_price"])
 
         
         return order
     
-    def _execute_fill(self, user_id: int, order: Order, fill_price:float) -> None:
+    def _execute_fill(self, user_id: int, order: Order, fill_price:float, new_cash: float, new_quantity: float, new_average_price: float) -> None:
         """Compute new state, sync C++ engine, and write WAL entry after a risk-approved order.
 
         Args:
@@ -86,38 +86,20 @@ class OrderService:
             order: The filled Order object.
             fill_price: Approved fill price returned by the risk engine.
         """
-
-                
-        
         
         order.status = OrderStatus.FILLED
         order.filled_price = Decimal(str(fill_price))
         side = order.side
         quantity = float(order.quantity)
         symbol = order.symbol
-        
-
-        account = Account.query.filter_by(user_id=user_id).first()
-        position = Position.query.filter_by(user_id=user_id, symbol=symbol).first()
-        old_cash = float(account.cash_balance)  
-        old_quantity = float(position.quantity) if position else 0.0
-        old_avg_price = float(position.average_price) if position else 0.0
 
         
-        if side == "BUY":
-            new_cash = old_cash - quantity * fill_price
-            new_quantity = old_quantity + quantity
-            new_avg_price = (old_quantity * old_avg_price + quantity * fill_price) / new_quantity
-        else:
-            new_cash = old_cash + quantity * fill_price
-            new_quantity = old_quantity - quantity
-            new_avg_price = old_avg_price
         self.risk_engine.update_state(
             user_id=user_id,
             symbol=symbol,
             new_cash=new_cash,
             new_quantity=new_quantity,
-            new_avg_price=new_avg_price,
+            new_avg_price=new_average_price,
             order_id=order.id,
             side=side,
             fill_price=fill_price,

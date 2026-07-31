@@ -38,7 +38,7 @@ class RiskEngineClient:
         request = trading_pb2.CheckOrderRequest(user_id=user_id, order_id = order_id, symbol=symbol,side=side,order_type=order_type,quantity=quantity, limit_price=limit_price)
         try:
             response = self.stub.CheckOrder(request, timeout = 2) 
-            return {"approved": response.approved, "fill_price": response.fill_price, "reason": response.reason}
+            return {"approved": response.approved, "fill_price": response.fill_price, "reason": response.reason, "new_cash_balance": response.new_cash_balance, "new_quantity": response.new_quantity, "new_average_price": response.new_average_price }
         
         
         except grpc.RpcError:
