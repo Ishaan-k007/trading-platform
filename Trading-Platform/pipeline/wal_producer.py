@@ -34,14 +34,30 @@ def main():
                     line = file.readline()
                     if not line:
                         break
+                    if not line.endswith("\n"):
+                        # Partial line - the writer hasn't finished flushing it
+                        # yet. Don't advance the cursor; re-read it whole next
+                        # poll instead of trying to parse a torn write.
+                        break
                     if line.strip():
-                        data = json.loads(line)
+                        try:
+                            data = json.loads(line)
+                        except json.JSONDecodeError as e:
+                            # A malformed/unparseable line should never take
+                            # the whole pipeline down - log it, skip past it
+                            # (this position is still saved as read), and
+                            # keep going so one bad entry can't wedge every
+                            # fill behind it forever.
+                            print(f"Skipping unparseable WAL line: {e} - {line!r}")
+                            position = file.tell()
+                            save_cursor(position)
+                            continue
                         producer.send(KAFKA_TOPIC, value=data)
                         producer.flush()
-                        save_cursor(file.tell())
                         position = file.tell()
+                        save_cursor(position)
                         print(f"Sent to Kafka: {data}")
-                        
+
             time.sleep(0.1)  # Sleep for a second before checking for new entries
                 
         
