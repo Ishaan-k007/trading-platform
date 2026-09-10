@@ -14,12 +14,21 @@ grpc::Status TradingServiceImplementation::ExecuteOrder(
     const std::string& side = request->side();
     const std::string& type = request->order_type();
 
-    // (1) reject malformed requests before touching any state
+    // (1) reject malformed requests before touching any state.
+    //
+    // `!(quantity > 0.0)` rather than `quantity <= 0.0`: every comparison
+    // involving NaN is false, so `NaN <= 0` is false and NaN would pass the
+    // second form. Negating the positive test catches zero, negatives and NaN
+    // together; isfinite then rules out infinity.
     if (request->client_order_id().empty()
+        || request->symbol().empty()
+        || request->user_id() <= 0
         || (side != "BUY" && side != "SELL")
         || (type != "MARKET" && type != "LIMIT")
         || !(request->quantity() > 0.0) || !std::isfinite(request->quantity())
-        || (type == "LIMIT" && !std::isfinite(request->limit_price()))) {
+        || (type == "LIMIT"
+            && (!(request->limit_price() > 0.0)
+                || !std::isfinite(request->limit_price())))) {
         response->set_result(trading::INVALID_ORDER);
         response->set_message("malformed order");
         return grpc::Status::OK;
@@ -57,6 +66,16 @@ grpc::Status TradingServiceImplementation::ExecuteOrder(
             response->set_message("limit price not met");
             return grpc::Status::OK;
         }
+    }
+
+    // (2b) overflow guard. A quantity near DBL_MAX multiplied by a price
+    // overflows to infinity, and the funds check would then compare against an
+    // infinite cost - reporting a required_cash of "inf" back to the caller
+    // rather than a number. Reject the order instead.
+    if (!std::isfinite(request->quantity() * fill_price)) {
+        response->set_result(trading::INVALID_ORDER);
+        response->set_message("order notional is not representable");
+        return grpc::Status::OK;
     }
 
     // (3) hand off to the atomic execute

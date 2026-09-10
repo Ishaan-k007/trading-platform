@@ -1,5 +1,4 @@
-from decimal import Decimal
-
+from core.money import to_decimal
 from models.order import Order
 from models.account import Account
 from models.position import Position
@@ -67,9 +66,9 @@ class OrderService:
                 symbol=symbol,
                 side=side,
                 order_type=order_type,
-                quantity=quantity,
-                limit_price=limit_price,
-                filled_price=Decimal(str(result["fill_price"])),
+                quantity=to_decimal(quantity),
+                limit_price=to_decimal(limit_price) if limit_price is not None else None,
+                filled_price=to_decimal(result["fill_price"]),
                 status=OrderStatus.FILLED,
                 idempotency_key=order_id,
             )

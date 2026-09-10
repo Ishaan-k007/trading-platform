@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 from extensions import db
+from core.money import ACCOUNT_CURRENCY, CURRENCY_CODE_LENGTH, DECIMAL_PRECISION, DECIMAL_SCALE
 
 
 class LedgerEntry(db.Model):
@@ -12,9 +13,10 @@ class LedgerEntry(db.Model):
     account_id      = db.Column(db.Integer, db.ForeignKey("accounts.id"), nullable=False)
     order_id        = db.Column(db.String(36), db.ForeignKey("orders.id"), nullable=True)
     entry_type      = db.Column(db.String(20), nullable=False)
-    amount          = db.Column(db.Numeric(18, 6), nullable=False)
-    running_balance = db.Column(db.Numeric(18, 6), nullable=False)
-    currency        = db.Column(db.String(3), nullable=False, default="GBP")
+    amount          = db.Column(db.Numeric(DECIMAL_PRECISION, DECIMAL_SCALE), nullable=False)
+    running_balance = db.Column(db.Numeric(DECIMAL_PRECISION, DECIMAL_SCALE), nullable=False)
+    currency        = db.Column(db.String(CURRENCY_CODE_LENGTH), nullable=False,
+                                default=ACCOUNT_CURRENCY)
     description     = db.Column(db.Text, nullable=True)
     created_at      = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 

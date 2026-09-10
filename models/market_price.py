@@ -1,12 +1,13 @@
 from datetime import datetime
 from extensions import db
+from core.money import DECIMAL_PRECISION, DECIMAL_SCALE
 
 
 class MarketPrice(db.Model):
     __tablename__ = "market_prices"
 
     symbol     = db.Column(db.String(10), primary_key=True)
-    price      = db.Column(db.Numeric(18, 6), nullable=False)
+    price      = db.Column(db.Numeric(DECIMAL_PRECISION, DECIMAL_SCALE), nullable=False)
     sector     = db.Column(db.String(50))
     volatility = db.Column(db.Numeric(6, 4), nullable=False, default=0.02)
     drift      = db.Column(db.Numeric(6, 4), nullable=False, default=0.0001)

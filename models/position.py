@@ -1,6 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 from extensions import db
+from core.money import DECIMAL_PRECISION, DECIMAL_SCALE
 
 
 class Position(db.Model):
@@ -10,9 +11,12 @@ class Position(db.Model):
     id            = db.Column(db.Integer, primary_key=True)
     user_id       = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     symbol        = db.Column(db.String(10), nullable=False)
-    quantity      = db.Column(db.Numeric(18, 6), nullable=False, default=Decimal("0"))
-    average_price = db.Column(db.Numeric(18, 6), nullable=False, default=Decimal("0"))
-    realised_pnl  = db.Column(db.Numeric(18, 6), nullable=False, default=Decimal("0"))
+    quantity      = db.Column(db.Numeric(DECIMAL_PRECISION, DECIMAL_SCALE),
+                              nullable=False, default=Decimal("0"))
+    average_price = db.Column(db.Numeric(DECIMAL_PRECISION, DECIMAL_SCALE),
+                              nullable=False, default=Decimal("0"))
+    realised_pnl  = db.Column(db.Numeric(DECIMAL_PRECISION, DECIMAL_SCALE),
+                              nullable=False, default=Decimal("0"))
     updated_at    = db.Column(db.DateTime, default=datetime.utcnow,
                               onupdate=datetime.utcnow, nullable=False)
 

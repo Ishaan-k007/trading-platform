@@ -152,3 +152,36 @@ def test_engine_rejects_malformed_quantities(stub, account, quantity):
     """The engine validates independently of the HTTP layer."""
     response = buy(stub, account, f"bad-{quantity}", quantity=quantity)
     assert response.result == trading_pb2.INVALID_ORDER
+
+
+def test_engine_rejects_an_empty_client_order_id(stub, account):
+    """Without a key there is nothing to make a retry idempotent against."""
+    response = buy(stub, account, "", quantity=1.0)
+    assert response.result == trading_pb2.INVALID_ORDER
+
+
+def test_engine_rejects_an_empty_symbol(stub, account):
+    response = stub.ExecuteOrder(trading_pb2.ExecuteOrderRequest(
+        client_order_id="empty-symbol", user_id=account, symbol="",
+        side="BUY", order_type="MARKET", quantity=1.0), timeout=5)
+    assert response.result == trading_pb2.INVALID_ORDER
+
+
+@pytest.mark.parametrize("limit_price", [0.0, -1.0, float("nan"), float("inf")])
+def test_engine_rejects_malformed_limit_prices(stub, account, limit_price):
+    response = stub.ExecuteOrder(trading_pb2.ExecuteOrderRequest(
+        client_order_id=f"badlimit-{limit_price}", user_id=account, symbol=SYMBOL,
+        side="BUY", order_type="LIMIT", quantity=1.0,
+        limit_price=limit_price), timeout=5)
+    assert response.result == trading_pb2.INVALID_ORDER
+
+
+def test_engine_rejects_an_order_whose_notional_overflows(stub, account):
+    """quantity * price near DBL_MAX becomes infinity.
+
+    Without the guard the funds check compares against an infinite cost and the
+    caller is told it needs "inf" cash, rather than being told the order is
+    malformed.
+    """
+    response = buy(stub, account, "overflow-1", quantity=1e308)
+    assert response.result == trading_pb2.INVALID_ORDER
