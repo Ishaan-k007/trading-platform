@@ -14,6 +14,7 @@ public:
     grpc::Status GetAllPrices(grpc::ServerContext* ctx, const trading::GetAllPricesRequest* request, trading::GetAllPricesResponse* response) override;
     grpc::Status HasUser(grpc::ServerContext* ctx, const trading::HasUserRequest* request, trading::HasUserResponse* response) override;
     grpc::Status UpdateOrderBook(grpc::ServerContext* ctx, const trading::OrderBookUpdateRequest* request, trading::OrderBookUpdateResponse* response) override;
+    grpc::Status ExecuteOrder(grpc::ServerContext* ctx, const trading::ExecuteOrderRequest* request, trading::ExecuteOrderResponse* response) override;
 
 
 private:
