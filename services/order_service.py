@@ -1,122 +1,93 @@
 from decimal import Decimal
+
 from models.order import Order
 from models.account import Account
 from models.position import Position
 from enums import OrderStatus
-from core.exceptions import InsufficientFundsError, InsufficientPositionError
+from core.exceptions import (
+    InsufficientFundsError,
+    InsufficientPositionError,
+    SymbolNotFoundError,
+    LimitNotMetError,
+    InvalidOrderError,
+    DuplicateRequestError,
+)
 from services.risk_engine_client import RiskEngineClient
-import uuid
+from services import trading_pb2
+
 
 class OrderService:
-    """Handles order placement, risk validation, and atomic trade execution."""
+    """Places orders via the C++ engine's atomic ExecuteOrder RPC."""
+
     def __init__(self, risk_engine: RiskEngineClient):
-        """Initialise the OrderService with a gRPC risk engine client.
-
-        Args:
-            risk_engine: Connected RiskEngineClient instance injected from app factory.
-        """
-
         self.risk_engine = risk_engine
-    
-    def place_order(self, user_id: int, order_id: str, side: str, symbol: str, quantity: float, order_type: str, limit_price: float) -> Order:
-        """Place an order and return the result.
 
-        Args:
-            user_id: ID of the user placing the order.
-            order_id: Unique order identifier for idempotency tracking.
-            side: 'BUY' or 'SELL'.
-            symbol: Stock ticker e.g. 'AAPL'.
-            quantity: Number of shares.
-            order_type: 'MARKET' or 'LIMIT'.
-            limit_price: Required for LIMIT orders, ignored for MARKET.
-        Returns:
-            The filled Order object with status FILLED and fill_price set.
+    def place_order(self, user_id: int, order_id: str, side: str, symbol: str,
+                    quantity: float, order_type: str, limit_price: float | None) -> Order:
+        """Execute an order and return the resulting FILLED Order.
 
-        Raises:
-            SymbolNotFoundError: If the symbol is not tracked by the risk engine.
-            InsufficientFundsError: If the user has insufficient cash for a BUY.
-            InsufficientPositionError: If the user has insufficient shares for a SELL.
-            RiskEngineUnavailableError: If the C++ engine is unreachable.
+        `order_id` is the *client's* id — the idempotency key. It goes to the
+        engine unchanged; a retry with the same value replays the original
+        outcome instead of executing twice. The engine mints its own canonical
+        id, which becomes Order.id.
+
+        Raises: SymbolNotFoundError, LimitNotMetError, InsufficientFundsError,
+        InsufficientPositionError, InvalidOrderError, DuplicateRequestError,
+        RiskEngineUnavailableError.
         """
-                
-        self.risk_engine.get_price(symbol)
-
+        # Ensure the engine has this user's cash/positions in memory.
         if not self.risk_engine.has_user(user_id):
             account = Account.query.filter_by(user_id=user_id).first()
             positions = Position.query.filter_by(user_id=user_id).all()
             self.risk_engine.load_user(
                 user_id=user_id,
                 cash_balance=float(account.cash_balance),
-                positions=[{"symbol": p.symbol, "quantity": float(p.quantity), "average_price": float(p.average_price)} for p in positions]
+                positions=[
+                    {"symbol": p.symbol, "quantity": float(p.quantity),
+                     "average_price": float(p.average_price)}
+                    for p in positions
+                ],
             )
 
-        
-        
-        result = self.risk_engine.check_order(user_id, order_id, side, symbol, quantity, order_type, limit_price)
-        
-        if not result["approved"]:
-            if side == "BUY":
-                account = Account.query.filter_by(user_id=user_id).first()
-                required = Decimal(str(quantity)) * Decimal(str(result.get("fill_price", limit_price)))
-                raise InsufficientFundsError(
-                    balance=account.cash_balance,
-                    required=required,
-                )
-            else:
-                position = Position.query.filter_by(user_id=user_id, symbol=symbol).first()
-                held = position.quantity if position else Decimal("0")
-                raise InsufficientPositionError(
-                    symbol=symbol,
-                    held=held,
-                    required=Decimal(str(quantity)),
-                )
-
-
-        order = Order(id=str(uuid.uuid4()), user_id=user_id, symbol=symbol, side=side, order_type=order_type, quantity=quantity, limit_price=limit_price, status=OrderStatus.PENDING)
-        self._execute_fill(user_id, order, result["fill_price"] , result["new_cash_balance"], result["new_quantity"], result["new_average_price"])
-
-        
-        return order
-    
-    def _execute_fill(self, user_id: int, order: Order, fill_price:float, new_cash: float, new_quantity: float, new_average_price: float) -> None:
-        """Compute new state, sync C++ engine, and write WAL entry after a risk-approved order.
-
-        Args:
-            user_id: ID of the user whose state to update.
-            order: The filled Order object.
-            fill_price: Approved fill price returned by the risk engine.
-        """
-        
-        order.status = OrderStatus.FILLED
-        order.filled_price = Decimal(str(fill_price))
-        side = order.side
-        quantity = float(order.quantity)
-        symbol = order.symbol
-
-        
-        self.risk_engine.update_state(
+        result = self.risk_engine.execute_order(
             user_id=user_id,
-            symbol=symbol,
-            new_cash=new_cash,
-            new_quantity=new_quantity,
-            new_avg_price=new_average_price,
-            order_id=order.id,
+            client_order_id=order_id,
             side=side,
-            fill_price=fill_price,
+            symbol=symbol,
             quantity=quantity,
-            order_type=order.order_type,
+            order_type=order_type,
+            limit_price=limit_price,
         )
-                
+        code = result["result"]
 
-        
-        
-        
+        if code == trading_pb2.FILLED:
+            return Order(
+                id=result["order_id"],
+                user_id=user_id,
+                symbol=symbol,
+                side=side,
+                order_type=order_type,
+                quantity=quantity,
+                limit_price=limit_price,
+                filled_price=Decimal(str(result["fill_price"])),
+                status=OrderStatus.FILLED,
+                idempotency_key=order_id,
+            )
 
+        if code == trading_pb2.UNKNOWN_SYMBOL:
+            raise SymbolNotFoundError(symbol)
+        if code == trading_pb2.LIMIT_NOT_MET:
+            raise LimitNotMetError(side, limit_price, result["market_price"])
+        if code == trading_pb2.INSUFFICIENT_FUNDS:
+            raise InsufficientFundsError(
+                balance=result["available_cash"], required=result["required_cash"])
+        if code == trading_pb2.INSUFFICIENT_POSITION:
+            raise InsufficientPositionError(
+                symbol=symbol,
+                held=result["available_quantity"],
+                required=result["required_quantity"])
+        if code == trading_pb2.IDEMPOTENCY_CONFLICT:
+            raise DuplicateRequestError(
+                f"client_order_id {order_id} was already used for a different order.")
 
-
-            
-            
-        
-            
-     
-              
+        raise InvalidOrderError(result["message"] or "Order rejected by the risk engine.")

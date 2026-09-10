@@ -18,7 +18,7 @@ struct PriceData {
  * @brief Thread-safe in-memory cache of current stock prices and GBM parameters.
  *
  * Written by the GBM simulation thread once per second via set_price().
- * Read by gRPC server threads on every CheckOrder and GetPrice call.
+ * Read by gRPC server threads on every ExecuteOrder and GetPrice call.
  * Exists to eliminate PostgreSQL round-trips on the risk check hot path.
  *
  * Uses shared_mutex so that multiple readers run concurrently, writer is exclusive.

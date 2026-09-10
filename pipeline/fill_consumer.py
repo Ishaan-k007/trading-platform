@@ -30,6 +30,10 @@ def process_fill(fill_data):
     order_id = fill_data.get("order_id")
     side = fill_data.get("side")
     order_type = fill_data.get("order_type")
+    client_order_id = fill_data.get("client_order_id")
+    event_id = fill_data.get("event_id")
+    account_sequence = fill_data.get("account_sequence")
+
 
     # Idempotency: wal_producer.py saves its file cursor only *after* a
     # successful Kafka send, so a crash in between replays the last line on
@@ -38,6 +42,11 @@ def process_fill(fill_data):
     if db.session.get(order.Order, order_id) is not None:
         print(f"[fill_consumer] order {order_id} already applied, skipping")
         return
+    if client_order_id and order.Order.query.filter_by(
+            idempotency_key=client_order_id).first() is not None:
+        print(f"[fill_consumer] client_order_id {client_order_id} already applied, skipping")
+        return
+
 
     acc = account.Account.query.filter_by(user_id=user_id).first()
     if acc is None:
@@ -53,7 +62,9 @@ def process_fill(fill_data):
         filled_price=fill_price,
         status=OrderStatus.FILLED,
         order_type=order_type,
-        limit_price=None
+        limit_price=None,
+        idempotency_key=client_order_id,
+
     )
     db.session.add(new_order)
     acc.cash_balance = new_cash

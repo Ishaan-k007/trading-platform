@@ -52,7 +52,9 @@ def main():
                             position = file.tell()
                             save_cursor(position)
                             continue
-                        producer.send(KAFKA_TOPIC, value=data)
+                        # hash the user_id to a string key to ensure that Kafka partition is always the same for a given user_id, so that fills for the same user are always processed in order.
+                        producer.send(KAFKA_TOPIC, key=str(data["user_id"]).encode(), value=data)
+
                         producer.flush()
                         position = file.tell()
                         save_cursor(position)
