@@ -1,8 +1,10 @@
+import time
 from urllib import request
 
 import grpc
 from services import trading_pb2, trading_pb2_grpc
 from core.exceptions import RiskEngineUnavailableError, SymbolNotFoundError
+from core.metrics import CHECKORDER_LATENCY
 
 
 
@@ -36,13 +38,16 @@ class RiskEngineClient:
             RiskEngineUnavailableError: If the C++ engine is unreachable or times out.
         """
         request = trading_pb2.CheckOrderRequest(user_id=user_id, order_id = order_id, symbol=symbol,side=side,order_type=order_type,quantity=quantity, limit_price=limit_price)
+        start = time.perf_counter()
         try:
-            response = self.stub.CheckOrder(request, timeout = 2) 
+            response = self.stub.CheckOrder(request, timeout = 2)
             return {"approved": response.approved, "fill_price": response.fill_price, "reason": response.reason, "new_cash_balance": response.new_cash_balance, "new_quantity": response.new_quantity, "new_average_price": response.new_average_price }
-        
-        
+
+
         except grpc.RpcError:
             raise RiskEngineUnavailableError()
+        finally:
+            CHECKORDER_LATENCY.observe(time.perf_counter() - start)
         
     
     def update_state(self, user_id: int, symbol: str, new_cash: float, new_quantity: float, 

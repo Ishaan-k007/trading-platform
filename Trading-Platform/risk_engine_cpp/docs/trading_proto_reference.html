@@ -18,14 +18,18 @@
   .warning { background: #fff3cd; border-left: 4px solid #f0ad4e; padding: 12px 16px; margin: 16px 0; border-radius: 3px; }
   .correct { background: #d4edda; border-left: 4px solid #28a745; padding: 12px 16px; margin: 16px 0; border-radius: 3px; }
   .pending { background: #e2e3f0; border-left: 4px solid #6f42c1; padding: 12px 16px; margin: 16px 0; border-radius: 3px; }
+  .deprecated { background: #fbeaea; border-left: 4px solid #c0392b; padding: 12px 16px; margin: 16px 0; border-radius: 3px; }
   .section-label { display: inline-block; background: #1a1a1a; color: white; font-size: 0.75em; padding: 2px 8px; border-radius: 3px; margin-bottom: 8px; letter-spacing: 1px; text-transform: uppercase; }
+  .dep-label { display: inline-block; background: #c0392b; color: white; font-size: 0.7em; padding: 2px 8px; border-radius: 3px; margin-left: 8px; letter-spacing: 1px; text-transform: uppercase; vertical-align: middle; }
   @media print { body { margin: 20px; } h1 { page-break-before: always; } h1:first-of-type { page-break-before: avoid; } }
 </style>
 </head>
 <body>
 
 <h1 style="margin-top:0; border-bottom: 3px solid #1a1a1a;">trading.proto — Complete Reference</h1>
-<p style="color:#666; font-size:0.9em;">Trading Platform — gRPC Contract Between Flask/Python and the C++ Engine &nbsp;|&nbsp; Date: 2026-07-15</p>
+<p style="color:#666; font-size:0.9em;">Trading Platform — gRPC Contract Between Flask/Python and the C++ Engine &nbsp;|&nbsp; Created: 2026-07-15 &nbsp;|&nbsp; Revised: 2026-08-06 — ExecuteOrder migration (see Part 5)</p>
+
+<div class="warning"><strong>This file is mid-migration.</strong> <code>CheckOrder</code>/<code>UpdateState</code> (the original order-execution pair) are being replaced by a single atomic <code>ExecuteOrder</code> RPC because the two-call design has a real, confirmed lost-update race condition — see the deprecation notices on each of them in Part 3, and the migration status checklist in Part 5 for exactly what's done versus still pending.</div>
 
 <!-- ================================================================ -->
 <h1>Part 1: What This File Is, In Plain English</h1>
@@ -41,6 +45,8 @@
 <tr><td><code>message</code></td><td>Declares a data structure — like defining a small class with only these fields and nothing else.</td></tr>
 <tr><td><code>= 1</code>, <code>= 2</code>, ...</td><td>Not a default value or array index. A permanent <strong>field tag</strong> — an ID number protobuf uses on the wire instead of sending the field name as text every time. Scoped per-message: message A's field <code>1</code> and message B's field <code>1</code> are unrelated. This is part of why protobuf is smaller and faster than JSON.</td></tr>
 <tr><td><code>repeated</code></td><td>Means "a list of," not a single value. A <code>repeated PriceLevel</code> field becomes a list-like object on both sides that you can iterate or append to.</td></tr>
+<tr><td><code>enum</code></td><td>A closed set of named integer values — e.g. <code>OrderResultCode</code> below. Proto3 requires the first value to be numbered <code>0</code> and treats it as the "unset" default, which is why every enum in this file starts with an explicit <code>..._UNSPECIFIED = 0;</code> entry rather than letting a real outcome silently double as the default.</td></tr>
+<tr><td><code>optional</code></td><td>Normally in proto3, a field that's never set just reads back as its type's zero-value (<code>0.0</code>, <code>""</code>) with no way to tell "never set" apart from "deliberately set to zero." Marking a field <code>optional</code> restores that distinction — it generates a <code>has_&lt;field&gt;()</code> check on both sides, so receiving code can ask "did they actually set this?" instead of guessing from the value.</td></tr>
 <tr><td><code>service</code> / <code>rpc</code></td><td>Declares a remote procedure — a function one process can call on another process over the network. Each <code>rpc</code> line names exactly one request message type and one response message type.</td></tr>
 <tr><td>Request / Response pair</td><td>The standard shape for every RPC in this file: one message travels <em>out</em> to the callee, a different message travels <em>back</em>. Same pattern as a function's arguments and its return value, just over a network instead of in-process.</td></tr>
 </table>
@@ -72,17 +78,85 @@
 <pre>Example instance: { price: 67200.50, quantity: 0.42 }
   — meaning: someone has an order for 0.42 BTC at $67,200.50</pre>
 
+<h2>OrderResultCode <span style="font-weight:normal; font-size:0.7em; color:#6f42c1;">(new)</span></h2>
+<p class="section-label">Used inside ExecuteOrderResponse</p>
+<p>Replaces the old <code>bool approved</code> + free-text <code>reason</code> pattern from <code>CheckOrderResponse</code>. That pattern is what let a LIMIT order that simply didn't cross the market get reported to the user as "insufficient funds" — Python had no reliable way to distinguish rejection reasons other than string-matching free text that was never actually checked (see the <code>CheckOrder</code> deprecation notice in Part 3). A typed enum makes each outcome a distinct value the caller can switch on instead of guessing.</p>
+<table>
+<tr><th>Value</th><th>Number</th><th>Meaning</th></tr>
+<tr><td><code>ORDER_RESULT_UNSPECIFIED</code></td><td>0</td><td>Never a real outcome — proto3's required zero-value. Seeing this on the wire means the field was never set, which is itself a bug.</td></tr>
+<tr><td><code>FILLED</code></td><td>1</td><td>Order executed. <code>fill_price</code>, <code>new_cash</code>, <code>new_quantity</code> are populated.</td></tr>
+<tr><td><code>UNKNOWN_SYMBOL</code></td><td>2</td><td>Symbol isn't tracked by the price store or order book.</td></tr>
+<tr><td><code>LIMIT_NOT_MET</code></td><td>3</td><td>LIMIT order's price never crossed the market — not a funds/position problem.</td></tr>
+<tr><td><code>INSUFFICIENT_FUNDS</code></td><td>4</td><td>BUY rejected — not enough cash. <code>required_cash</code>/<code>available_cash</code> populated.</td></tr>
+<tr><td><code>INSUFFICIENT_POSITION</code></td><td>5</td><td>SELL rejected — not enough held quantity. <code>required_quantity</code>/<code>available_quantity</code> populated.</td></tr>
+<tr><td><code>INVALID_ORDER</code></td><td>6</td><td>Malformed request — bad side/order_type, non-positive quantity, etc.</td></tr>
+<tr><td><code>IDEMPOTENCY_CONFLICT</code></td><td>7</td><td>Same <code>client_order_id</code> seen before, but with different order details (symbol/side/quantity) — a retry can't be assumed safe when the request itself changed.</td></tr>
+<tr><td><code>INTERNAL_ERROR</code></td><td>8</td><td>Engine-side failure unrelated to the order itself (e.g. WAL write failed).</td></tr>
+</table>
+<div class="pending">Intended Python-side mapping (<code>services/risk_engine_client.py</code>): each non-<code>FILLED</code> code raises a distinct <code>core.exceptions.TradingError</code> subclass instead of the current one-size-fits-all <code>InsufficientFundsError</code>/<code>InsufficientPositionError</code> branching. Not implemented yet — this is the target design, tracked as its own migration step.</div>
+
+<h2>The Four Identifiers <span style="font-weight:normal; font-size:0.7em; color:#6f42c1;">(new)</span></h2>
+<p class="section-label">user_id, client_order_id, order_id, event_id — used across ExecuteOrderRequest/Response</p>
+<p>Four different IDs travel through one order. They are not four names for the same thing — each answers a different question, at a different point in the pipeline, and merging any two of them removes a real guarantee.</p>
+<table>
+<tr><th>Identifier</th><th>Assigned by</th><th>Answers</th></tr>
+<tr><td><code>user_id</code></td><td>Already exists (the account)</td><td>"Whose account is this against?" — not really part of the order-identity story at all; it's what selects which per-user lock and <code>UserState</code> to touch in <code>user_state_store.cpp</code>.</td></tr>
+<tr><td><code>client_order_id</code></td><td>The calling strategy/client, before the request is ever sent</td><td>"Did I already send this exact request?" Stays identical across a client's own retries (e.g. after a dropped connection), which is what makes deduplication possible. Must never be replaced with a server-generated value before it reaches the WAL — doing so is what currently makes idempotency impossible end-to-end, see Part 5.</td></tr>
+<tr><td><code>order_id</code></td><td>C++, once an order is accepted</td><td>"What do I call this order for the rest of its life?" A permanent, globally-unique, server-generated identity — the primary key for the <code>orders</code> table row, and what <code>RiskCheck</code>/<code>LedgerEntry</code> foreign-key against. Server-generated (not client-supplied) because a client's own id is only guaranteed unique to that one client — two different strategy bots could independently choose the same string.</td></tr>
+<tr><td><code>event_id</code></td><td>C++, once the WAL entry is written</td><td>"Did I already process this delivery?" — a different concern from the order itself. Kafka's at-least-once delivery guarantee means <code>fill_consumer.py</code> can receive the <em>same message twice</em> even though the order was only ever executed once. <code>event_id</code> lets the consumer recognize a redelivered event and skip it, independent of whether the order was retried.</td></tr>
+</table>
+<div class="warning"><strong>What breaks if two of these are merged into one:</strong>
+<ul style="margin:8px 0 0 0; padding-left:22px;">
+<li><code>client_order_id</code> merged into <code>order_id</code> (client picks the permanent id) — two strategies can collide on the same string and silently share/overwrite each other's order row.</li>
+<li><code>order_id</code> merged into <code>event_id</code> (one id for "the order" and "this log entry") — breaks the moment an order can produce more than one event (e.g. a future partial-fill feature).</li>
+<li><code>event_id</code> dropped, deduping on <code>client_order_id</code> alone — a Kafka rebalance redelivering the same message looks identical to a legitimate new order; <code>fill_consumer.py</code> could double-apply a fill to the cash balance.</li>
+</ul>
+</div>
+
 <!-- ================================================================ -->
 <h1>Part 3: Every RPC, In Detail</h1>
 
-<h2>1. CheckOrder</h2>
+<h2>1. ExecuteOrder <span style="font-weight:normal; font-size:0.7em; color:#6f42c1;">(new — replaces CheckOrder + UpdateState)</span></h2>
 <p class="section-label">Called by: Flask (order_service.py) &nbsp;→&nbsp; Answered by: C++ risk engine</p>
-<p><strong>What it's for:</strong> Before any trade is allowed to happen, Flask asks the C++ engine "can this user actually do this?" — checking funds for a BUY or held quantity for a SELL — entirely from in-memory state, no database round trip. This is the risk-check step of the order pipeline.</p>
+<p><strong>What it's for:</strong> Executes an order atomically in a single RPC — validates, prices, checks funds/position, writes the WAL entry, and applies the resulting state to the in-memory user record, all under one held per-user lock, acquired once and released only after either a rejection is returned or the WAL succeeds and state has been applied. This collapses the <code>CheckOrder</code> → (Python round-trip) → <code>UpdateState</code> flow down to zero gap — there is no longer a window between "compute the new state" and "commit it" for a second concurrent order to land in.</p>
+<h3>ExecuteOrderRequest</h3>
+<table>
+<tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
+<tr><td><code>client_order_id</code></td><td>string</td><td>Caller-supplied, stable across retries — see "The Four Identifiers" above</td></tr>
+<tr><td><code>user_id</code></td><td>int32</td><td>Who is placing the order</td></tr>
+<tr><td><code>symbol</code></td><td>string</td><td>What's being traded</td></tr>
+<tr><td><code>side</code></td><td>string</td><td><code>"BUY"</code> or <code>"SELL"</code></td></tr>
+<tr><td><code>order_type</code></td><td>string</td><td><code>"MARKET"</code> or <code>"LIMIT"</code></td></tr>
+<tr><td><code>quantity</code></td><td>double</td><td>How much to trade</td></tr>
+<tr><td><code>limit_price</code></td><td>double</td><td>Only meaningful for LIMIT orders</td></tr>
+</table>
+<div class="correct">Deliberately absent: any <code>new_cash</code>/<code>new_quantity</code>-style field. This request cannot carry a resulting balance even if a caller wanted it to — the field doesn't exist. Python owns request transport and presentation; C++ owns execution price, the risk decision, and the state mutation. This is what makes it structurally impossible to reintroduce the old bug where Python computed (or mis-computed) a balance and told C++ to accept it.</div>
+<h3>ExecuteOrderResponse</h3>
+<table>
+<tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
+<tr><td><code>result</code></td><td><code>OrderResultCode</code></td><td>Typed outcome — see above</td></tr>
+<tr><td><code>client_order_id</code></td><td>string</td><td>Echoed back unchanged, for the caller to match against its own retry</td></tr>
+<tr><td><code>order_id</code></td><td>string</td><td>Canonical server-generated order identifier</td></tr>
+<tr><td><code>event_id</code></td><td>string</td><td>Identifier for the committed WAL/Kafka event</td></tr>
+<tr><td><code>fill_price</code>, <code>market_price</code></td><td>optional double</td><td>Only meaningful when <code>result == FILLED</code></td></tr>
+<tr><td><code>required_cash</code>, <code>available_cash</code></td><td>optional double</td><td>Only meaningful on <code>INSUFFICIENT_FUNDS</code> — lets Python report the real shortfall instead of computing (and potentially miscomputing) its own</td></tr>
+<tr><td><code>required_quantity</code>, <code>available_quantity</code></td><td>optional double</td><td>Only meaningful on <code>INSUFFICIENT_POSITION</code></td></tr>
+<tr><td><code>new_cash</code>, <code>new_quantity</code></td><td>optional double</td><td>New balances after a fill, for <em>display only</em> — Python must never send these back on a later request</td></tr>
+<tr><td><code>account_sequence</code></td><td>uint64</td><td>Running per-user counter, incremented on every applied state change</td></tr>
+<tr><td><code>message</code></td><td>string</td><td>Human-readable detail, for logs — not something calling code should branch on; that's what <code>result</code> is for</td></tr>
+</table>
+<p><strong>Connects to:</strong> the WAL entry is written <em>inside</em> the same locked critical section as the state mutation, before the lock is released — unlike the deprecated flow, there is no path where a mutation is applied in memory without a corresponding WAL entry existing. From there, the same downstream pipeline as before: <code>pipeline/wal_producer.py</code> → Kafka <code>order-fills</code> topic → <code>pipeline/fill_consumer.py</code> → PostgreSQL.</p>
+<div class="pending"><strong>Status: contract defined only.</strong> This message shape exists in the <code>.proto</code> and stubs can be regenerated from it, but there is no C++ handler in <code>trading_service.cpp</code> yet, no split evaluate/apply logic in <code>user_state_store.cpp</code>, no dedupe map, and no Python client method. See Part 5 for the full checklist.</div>
+
+<h2>2. CheckOrder <span class="dep-label">Deprecated</span></h2>
+<p class="section-label">Called by: Flask (order_service.py) &nbsp;→&nbsp; Answered by: C++ risk engine</p>
+<div class="deprecated"><strong>Deprecated: replaced by <code>ExecuteOrder</code>.</strong> Despite its name, this RPC does not only check — it fully <em>mutates</em> <code>user.cash</code>/<code>user.positions</code> inside <code>check_and_reserve_position</code>, releases the per-user lock, and returns the result to Python <em>before</em> anything is confirmed or persisted. Because the lock is released here and re-acquired later inside a separate <code>UpdateState</code> call, there is a real window — spanning a full Python round-trip — where a second concurrent order for the same user can be evaluated against state that is about to be overwritten. Two orders for one user, interleaved across their <code>CheckOrder</code>/<code>UpdateState</code> pairs, can silently lose one trade's effect on the cash balance with no error raised. Left in place, not deleted, so nothing still depending on it breaks mid-migration — new code must call <code>ExecuteOrder</code> instead.</div>
+<p><strong>What it was for:</strong> Before any trade was allowed to happen, Flask asked the C++ engine "can this user actually do this?" — checking funds for a BUY or held quantity for a SELL — entirely from in-memory state, no database round trip.</p>
 <h3>CheckOrderRequest</h3>
 <table>
 <tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
 <tr><td><code>user_id</code></td><td>int32</td><td>Who is placing the order</td></tr>
-<tr><td><code>order_id</code></td><td>string</td><td>Client-supplied unique ID (idempotency)</td></tr>
+<tr><td><code>order_id</code></td><td>string</td><td>Intended as a client-supplied unique ID, but nothing downstream of this call actually preserves it — see the identifier note in Part 5</td></tr>
 <tr><td><code>symbol</code></td><td>string</td><td>What's being traded</td></tr>
 <tr><td><code>side</code></td><td>string</td><td><code>"BUY"</code> or <code>"SELL"</code></td></tr>
 <tr><td><code>order_type</code></td><td>string</td><td><code>"MARKET"</code> or <code>"LIMIT"</code></td></tr>
@@ -93,21 +167,22 @@
 <table>
 <tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
 <tr><td><code>approved</code></td><td>bool</td><td>Can this order proceed?</td></tr>
-<tr><td><code>reason</code></td><td>string</td><td>Why it was rejected, if it was</td></tr>
-<tr><td><code>risk_score</code></td><td>double</td><td>Internal risk metric</td></tr>
-<tr><td><code>fill_price</code></td><td>double</td><td>The price the order would fill at if approved</td></tr>
+<tr><td><code>reason</code></td><td>string</td><td>Free-text rejection reason — never actually inspected by <code>order_service.py</code>, which is why a LIMIT-not-met rejection currently gets reported to the user as "insufficient funds"</td></tr>
+<tr><td><code>risk_score</code></td><td>double</td><td>Field exists but nothing ever sets it — no scoring model has been implemented</td></tr>
+<tr><td><code>fill_price</code></td><td>double</td><td>Never set on a rejection, which silently defaults to protobuf's zero-value <code>0.0</code> — combined with the reason bug above, this is why a rejected order can currently report "requires $0"</td></tr>
 </table>
-<p><strong>Connects to:</strong> If <code>approved</code> is true, Flask immediately calls <code>UpdateState</code> to actually apply the trade. If false, <code>order_service.py</code> raises <code>InsufficientFundsError</code> or <code>InsufficientPositionError</code> using the returned <code>reason</code>/<code>fill_price</code>.</p>
+<p><strong>Connects to:</strong> If <code>approved</code> is true, Flask immediately calls <code>UpdateState</code> to actually apply the trade. If false, <code>order_service.py</code> raises <code>InsufficientFundsError</code> or <code>InsufficientPositionError</code> unconditionally based on order side, regardless of what <code>reason</code> actually says.</p>
 
-<h2>2. UpdateState</h2>
+<h2>3. UpdateState <span class="dep-label">Deprecated</span></h2>
 <p class="section-label">Called by: Flask, immediately after an approved CheckOrder</p>
-<p><strong>What it's for:</strong> Commits an approved trade into the engine's in-memory state (new cash balance, new position) and writes a Write-Ahead-Log entry — this is the only place a trade becomes "real" inside the engine. No PostgreSQL write happens here or anywhere in this path; persistence happens later, asynchronously, via the WAL → Kafka → <code>fill_consumer.py</code> pipeline.</p>
+<div class="deprecated"><strong>Deprecated: replaced by <code>ExecuteOrder</code>.</strong> This is the other half of the <code>CheckOrder</code>/<code>UpdateState</code> race condition: it unconditionally overwrites <code>user.cash</code>/<code>user.positions</code> with whatever absolute values Python sends, on the assumption that Python is echoing back exactly what <code>CheckOrder</code> told it — rather than C++ computing the result itself from current state at the moment of commit. If two orders for the same user are in flight, whichever <code>UpdateState</code> call lands last wins, even if its snapshot is now stale — silently undoing the other order's effect on the balance. Left in place so nothing still depending on it breaks mid-migration — new code must call <code>ExecuteOrder</code> instead.</div>
+<p><strong>What it was for:</strong> Committed an approved trade into the engine's in-memory state (new cash balance, new position) and wrote a Write-Ahead-Log entry — this was the only place a trade became "real" inside the engine. No PostgreSQL write happens here or anywhere in this path; persistence happens later, asynchronously, via the WAL → Kafka → <code>fill_consumer.py</code> pipeline.</p>
 <h3>UpdateStateRequest</h3>
 <table>
 <tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
 <tr><td><code>user_id</code></td><td>int32</td><td>Whose state to update</td></tr>
 <tr><td><code>symbol</code></td><td>string</td><td>Which symbol was traded</td></tr>
-<tr><td><code>new_cash_balance</code></td><td>double</td><td>Cash balance after this fill</td></tr>
+<tr><td><code>new_cash_balance</code></td><td>double</td><td>Cash balance after this fill — computed by <em>Python</em>, from the snapshot <code>CheckOrder</code> returned, not recomputed here</td></tr>
 <tr><td><code>new_quantity</code></td><td>double</td><td>Position size after this fill</td></tr>
 <tr><td><code>new_average_price</code></td><td>double</td><td>Updated cost basis</td></tr>
 <tr><td><code>order_id</code>, <code>side</code>, <code>fill_price</code>, <code>quantity</code>, <code>order_type</code></td><td>mixed</td><td>Full fill details — included so the WAL entry written from this call is complete on its own, without needing to look anything else up</td></tr>
@@ -120,7 +195,7 @@
 </table>
 <p><strong>Connects to:</strong> the WAL entry written here is later read by <code>pipeline/wal_producer.py</code> and published to Kafka's <code>order-fills</code> topic, eventually landing in PostgreSQL via <code>pipeline/fill_consumer.py</code>.</p>
 
-<h2>3. LoadUser</h2>
+<h2>4. LoadUser</h2>
 <p class="section-label">Called by: Flask, only the first time a user is seen</p>
 <p><strong>What it's for:</strong> The C++ engine holds trading state in RAM, not the database — but RAM is empty on startup. The first time a given user places an order, Flask reads their current cash and positions out of PostgreSQL and hands them to the engine once, so every subsequent order for that user is answered from memory with no DB read.</p>
 <h3>LoadUserRequest</h3>
@@ -136,9 +211,9 @@
 <tr><td><code>success</code></td><td>bool</td><td>Did the load apply</td></tr>
 <tr><td><code>message</code></td><td>string</td><td>Human-readable detail</td></tr>
 </table>
-<p><strong>Connects to:</strong> gated by <code>HasUser</code> (below) — Flask always checks <code>HasUser</code> first and only calls <code>LoadUser</code> if the answer is no. This pair together is the "write-through cache" pattern.</p>
+<p><strong>Connects to:</strong> gated by <code>HasUser</code> (below) — Flask always checks <code>HasUser</code> first and only calls <code>LoadUser</code> if the answer is no. This pair together is the "write-through cache" pattern. Unaffected by the ExecuteOrder migration — this stays exactly as it is.</p>
 
-<h2>4. HasUser</h2>
+<h2>5. HasUser</h2>
 <p class="section-label">Called by: Flask, before every order, to decide whether LoadUser is needed</p>
 <p><strong>What it's for:</strong> A cheap yes/no check — "is this user already sitting in your memory?" Exists purely to avoid an unnecessary PostgreSQL read on every single order; only the very first order for a given user pays that cost.</p>
 <h3>HasUserRequest</h3>
@@ -146,9 +221,9 @@
 <h3>HasUserResponse</h3>
 <table><tr><th>Field</th><th>Type</th><th>Meaning</th></tr><tr><td><code>loaded</code></td><td>bool</td><td>True if already in memory</td></tr></table>
 
-<h2>5. GetPrice</h2>
+<h2>6. GetPrice</h2>
 <p class="section-label">Called by: Flask market_routes.py (GET /prices/&lt;symbol&gt;), and internally by order_service.py</p>
-<p><strong>What it's for:</strong> Returns the current price the engine is using for one symbol. Today this is a GBM-simulated price; from Stage 3 onward it will read from the real order book instead — this RPC's shape doesn't need to change for that, only what's behind it inside the engine.</p>
+<p><strong>What it's for:</strong> Returns the current price the engine is using for one symbol, read from the live order book when one exists (falling back to the seeded <code>PriceStore</code> otherwise). Kept as a separate read-only informational RPC from order execution — <code>ExecuteOrder</code> does its own internal lookup against the same underlying store rather than requiring this to be called first.</p>
 <h3>GetPriceRequest</h3>
 <table><tr><th>Field</th><th>Type</th><th>Meaning</th></tr><tr><td><code>symbol</code></td><td>string</td><td>Which symbol</td></tr></table>
 <h3>GetPriceResponse</h3>
@@ -157,10 +232,12 @@
 <tr><td><code>symbol</code></td><td>string</td><td>Echoed back</td></tr>
 <tr><td><code>price</code></td><td>double</td><td>Current price</td></tr>
 <tr><td><code>updated_at</code></td><td>string</td><td>Timestamp of the last update</td></tr>
+<tr><td><code>best_bid</code>, <code>best_ask</code></td><td>double</td><td>Top of book, when live order-book data is available</td></tr>
 </table>
-<div class="warning">If the symbol was never seeded into the engine, this RPC returns a gRPC <code>NOT_FOUND</code> status, which <code>risk_engine_client.py</code> turns into a <code>SymbolNotFoundError</code> — this is the exact mechanism that currently blocks trading on any symbol the engine hasn't been told about in advance. Relevant once real Binance symbols (hundreds of them) start arriving — see the <code>UpdateOrderBook</code> section below.</div>
+<div class="warning">If the symbol was never seeded into the engine, this RPC returns a gRPC <code>NOT_FOUND</code> status, which <code>risk_engine_client.py</code> turns into a <code>SymbolNotFoundError</code>.</div>
+<div class="warning"><strong>Known minor issue:</strong> <code>best_bid</code> and <code>best_ask</code> are read via two separate calls into <code>OrderBook</code> (<code>best_bid()</code> then <code>best_ask()</code>), each independently acquiring and releasing the book's lock. If the order book updates between the two calls, the response can mix a bid from one snapshot with an ask from a slightly later one. Low real-world impact at current update frequency; tracked as a fix (read both under one lock acquisition) rather than left silent.</div>
 
-<h2>6. GetAllPrices</h2>
+<h2>7. GetAllPrices</h2>
 <p class="section-label">Called by: Flask market_routes.py (GET /prices)</p>
 <p><strong>What it's for:</strong> Same idea as <code>GetPrice</code>, but for every symbol at once — powers the "all current prices" market data endpoint.</p>
 <h3>GetAllPricesRequest</h3>
@@ -168,15 +245,15 @@
 <h3>GetAllPricesResponse</h3>
 <table><tr><th>Field</th><th>Type</th><th>Meaning</th></tr><tr><td><code>prices</code></td><td>map&lt;string, double&gt;</td><td>Symbol → current price, for every symbol the engine knows about</td></tr></table>
 
-<h2>7. UpdateOrderBook <span style="font-weight:normal; font-size:0.7em; color:#6f42c1;">(new — Stage 1)</span></h2>
-<p class="section-label">Called by: the Binance feed handler (pipeline/binance_feed_producer.py), once per depth snapshot</p>
-<p><strong>What it's for:</strong> Delivers one real order book snapshot for one symbol — Binance's top-20 bid/ask levels — from the Python feed handler into the C++ engine's memory, replacing the fake GBM-simulated price with real market data.</p>
+<h2>8. UpdateOrderBook</h2>
+<p class="section-label">Called by: the Binance feed handler (pipeline/orderbook_feed_producer.py), once per depth snapshot</p>
+<p><strong>What it's for:</strong> Delivers one real order book snapshot for one symbol — Binance's top-of-book bid/ask levels — from the Python feed handler into the C++ engine's memory.</p>
 <h3>OrderBookUpdateRequest</h3>
 <table>
 <tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
 <tr><td><code>symbol</code></td><td>string</td><td>Which trading pair this snapshot is for, e.g. <code>"BTCUSDT"</code></td></tr>
-<tr><td><code>bids</code></td><td>repeated <code>PriceLevel</code></td><td>Up to 20 buy-side levels, best-to-worst</td></tr>
-<tr><td><code>asks</code></td><td>repeated <code>PriceLevel</code></td><td>Up to 20 sell-side levels, best-to-worst</td></tr>
+<tr><td><code>bids</code></td><td>repeated <code>PriceLevel</code></td><td>Buy-side levels, best-to-worst</td></tr>
+<tr><td><code>asks</code></td><td>repeated <code>PriceLevel</code></td><td>Sell-side levels, best-to-worst</td></tr>
 <tr><td><code>updated_at</code></td><td>string</td><td>Timestamp of this snapshot</td></tr>
 </table>
 <h3>OrderBookUpdateResponse</h3>
@@ -186,51 +263,78 @@
 
 OrderBookUpdateRequest {
   symbol: "BTCUSDT"
-  bids: [ {price: 67200.50, quantity: 0.42}, {price: 67199.00, quantity: 1.10}, ... up to 20 ]
-  asks: [ {price: 67201.00, quantity: 0.30}, {price: 67202.50, quantity: 0.85}, ... up to 20 ]
+  bids: [ {price: 67200.50, quantity: 0.42}, {price: 67199.00, quantity: 1.10}, ... ]
+  asks: [ {price: 67201.00, quantity: 0.30}, {price: 67202.50, quantity: 0.85}, ... ]
   updated_at: "2026-07-15T14:02:31Z"
 }</pre>
-
-<div class="pending"><strong>Status: contract defined, handler not yet written.</strong> The <code>.proto</code> definition above exists and Python's generated stubs are ready to use it, but there is no C++ function implementing <code>UpdateOrderBook</code> yet, and no <code>OrderBook</code> store to hold the data it delivers (Stage 2). Because the stream used is Binance's <em>partial-depth snapshot</em> (not diff-depth), each incoming message is a complete, self-contained picture — the eventual handler only needs to <em>replace</em> whatever it's holding for that symbol, never merge or reconcile against previous state.</div>
-
-<div class="warning"><strong>Auto-registration requirement:</strong> unlike <code>PriceStore</code> (which requires a symbol to be pre-seeded from the <code>market_prices</code> table before <code>GetPrice</code>/<code>set_price</code> will do anything for it), the new <code>OrderBook</code> store must create an entry for a symbol the first time <code>UpdateOrderBook</code> is called for it. At target scale (300+ live Binance symbols), nobody is hand-inserting hundreds of rows into Postgres to unlock trading — the real order book data itself is the registration.</div>
 
 <!-- ================================================================ -->
 <h1>Part 4: How The RPCs Fit Together — End to End</h1>
 
-<h2>Order placement flow</h2>
+<h2>Order placement flow — deprecated (still what the code does until Part 5's checklist is complete)</h2>
 <pre>Flask receives POST /orders
    → HasUser?           (cheap check: is this user already in memory?)
        → no  → LoadUser  (one-time: pull cash + positions from Postgres)
-   → CheckOrder          (can they afford / do they hold enough?)
-       → approved? → UpdateState   (commit the fill, write WAL entry)
-                   → (async, off this path) WAL → Kafka → Postgres</pre>
+   → CheckOrder          (mutates state immediately, releases lock, returns a snapshot)
+       → approved? → UpdateState   (Python echoes the snapshot back; overwrites state again)
+                   → (async, off this path) WAL → Kafka → Postgres
+
+   ⚠ the gap between CheckOrder returning and UpdateState landing is where the
+     lost-update race condition lives — see the deprecation notices in Part 3.</pre>
+
+<h2>Order placement flow — target</h2>
+<pre>Flask receives POST /orders
+   → HasUser?           (cheap check: is this user already in memory?)
+       → no  → LoadUser  (one-time: pull cash + positions from Postgres)
+   → ExecuteOrder        (one call: lock → dedupe check → price → validate →
+                           evaluate → write WAL → apply state → unlock → return)
+                   → (async, off this path) WAL → Kafka → Postgres
+
+   No gap between "compute the new state" and "commit it" — both happen
+   under one held lock, inside one RPC.</pre>
 
 <h2>Market data flow</h2>
 <pre>Browser / researcher hits GET /prices or GET /prices/&lt;symbol&gt;
    → Flask calls GetAllPrices or GetPrice
-   → today: reads the GBM-simulated PriceStore
-   → after Stage 3: reads the real OrderBook store instead — same RPCs, different data source underneath</pre>
+   → reads the live OrderBook store when populated, falling back to the seeded PriceStore</pre>
 
-<h2>Real market data ingestion flow (Stage 1, in progress)</h2>
-<pre>Binance WebSocket (partial-depth stream, sharded across multiple connections)
+<h2>Real market data ingestion flow</h2>
+<pre>Binance WebSocket (partial-depth stream)
    → Python feed handler parses the JSON snapshot
    → builds an OrderBookUpdateRequest
    → calls UpdateOrderBook over gRPC
-   → [not yet built] C++ handler stores it in the OrderBook class (Stage 2)
-   → [not yet built] GetPrice / a future signals RPC reads real data from there</pre>
+   → C++ stores it in the OrderBook class
+   → GetPrice / ExecuteOrder's internal price lookup both read from there</pre>
 
 <h2>Summary table</h2>
 <table>
 <tr><th>RPC</th><th>Caller</th><th>Purpose</th><th>Status</th></tr>
-<tr><td>CheckOrder</td><td>Flask</td><td>Risk check before a trade</td><td>Implemented</td></tr>
-<tr><td>UpdateState</td><td>Flask</td><td>Commit an approved trade</td><td>Implemented</td></tr>
+<tr><td>ExecuteOrder</td><td>Flask</td><td>Atomic risk-check + commit for a trade</td><td>Contract only — see Part 5</td></tr>
+<tr><td>CheckOrder</td><td>Flask</td><td>Risk check before a trade</td><td>Deprecated — do not use in new code</td></tr>
+<tr><td>UpdateState</td><td>Flask</td><td>Commit an approved trade</td><td>Deprecated — do not use in new code</td></tr>
 <tr><td>LoadUser</td><td>Flask</td><td>Seed a user into memory</td><td>Implemented</td></tr>
 <tr><td>HasUser</td><td>Flask</td><td>Check if a user is already in memory</td><td>Implemented</td></tr>
-<tr><td>GetPrice</td><td>Flask</td><td>Read one symbol's current price</td><td>Implemented (GBM-backed)</td></tr>
-<tr><td>GetAllPrices</td><td>Flask</td><td>Read every symbol's current price</td><td>Implemented (GBM-backed)</td></tr>
-<tr><td>UpdateOrderBook</td><td>Binance feed handler</td><td>Deliver a real order book snapshot</td><td>Contract only — handler pending (Stage 2)</td></tr>
+<tr><td>GetPrice</td><td>Flask</td><td>Read one symbol's current price</td><td>Implemented</td></tr>
+<tr><td>GetAllPrices</td><td>Flask</td><td>Read every symbol's current price</td><td>Implemented</td></tr>
+<tr><td>UpdateOrderBook</td><td>Binance feed handler</td><td>Deliver a real order book snapshot</td><td>Implemented</td></tr>
 </table>
+
+<!-- ================================================================ -->
+<h1>Part 5: ExecuteOrder Migration — Status Checklist</h1>
+<p>Tracks the fix for three confirmed issues: the lost-update race condition (#25), rejected orders reporting the wrong error type (#26), and unenforced idempotency (#13). Proto changes are step one because both C++ and Python compile against this file — nothing below it can be built until the contract exists.</p>
+<table>
+<tr><th>#</th><th>Step</th><th>File(s)</th><th>Status</th></tr>
+<tr><td>1</td><td>Add <code>OrderResultCode</code>, <code>ExecuteOrderRequest</code>/<code>Response</code>, <code>ExecuteOrder</code> rpc; deprecate <code>CheckOrder</code>/<code>UpdateState</code>; regenerate C++ and Python stubs</td><td><code>proto/trading.proto</code></td><td class="correct" style="border-radius:3px; padding:2px 8px; display:inline-block;">Contract written</td></tr>
+<tr><td>2</td><td>Split mutation out of the risk check: non-mutating <code>evaluate_order</code> + separate <code>apply_order</code>; add per-user dedupe map (<code>processed_orders</code>) and <code>account_sequence</code></td><td><code>user_state_store.hpp/.cpp</code></td><td>Pending</td></tr>
+<tr><td>3</td><td>Extend the WAL event schema with <code>client_order_id</code>, <code>order_id</code>, <code>event_id</code>, <code>account_sequence</code> — keeping <code>new_cash</code>/<code>new_quantity</code>/<code>new_avg_price</code> field names so <code>fill_consumer.py</code> doesn't silently break</td><td><code>wal_writer.hpp/.cpp</code></td><td>Pending</td></tr>
+<tr><td>4</td><td>Implement <code>ExecuteOrder</code>: acquire the per-user lock once, dedupe check, price lookup, validate, evaluate, write WAL, apply state, unlock, return</td><td><code>trading_service.hpp/.cpp</code></td><td>Pending</td></tr>
+<tr><td>5</td><td>Add <code>execute_order()</code>; map <code>OrderResultCode</code> to domain exceptions</td><td><code>services/risk_engine_client.py</code></td><td>Pending</td></tr>
+<tr><td>6</td><td>Add <code>LimitNotMetError</code>, <code>IdempotencyConflictError</code></td><td><code>core/exceptions.py</code></td><td>Pending</td></tr>
+<tr><td>7</td><td>Collapse <code>check_order</code>/<code>_execute_fill</code>/<code>update_state</code> into one <code>execute_order</code> call; stop discarding the client's <code>order_id</code> into a fresh server-generated UUID before it reaches the WAL/DB</td><td><code>services/order_service.py</code></td><td>Pending</td></tr>
+<tr><td>8</td><td>Look up <code>Order.idempotency_key</code> before calling <code>execute_order</code>; return the existing order on a duplicate instead of re-executing</td><td><code>services/order_service.py</code></td><td>Pending</td></tr>
+<tr><td>9</td><td><em>(Recommended, not required)</em> Real unit tests for the race condition and idempotency scenarios — the current integration tests mock <code>place_order</code> entirely and would not catch either bug</td><td><code>tests/</code></td><td>Pending</td></tr>
+</table>
+<div class="warning"><strong>Separately tracked, unrelated to this migration:</strong> <code>wal.cursor</code> is currently committed to git (should be gitignored — it's runtime state, and a stale committed cursor is the exact crash <code>wal_writer.cpp</code>'s own comment describes); <code>main.cpp</code> hardcodes Postgres credentials instead of reading them from environment variables the way <code>config.py</code> does for the rest of the app. Neither blocks this migration; both are cheap fixes worth doing alongside it.</div>
 
 </body>
 </html>

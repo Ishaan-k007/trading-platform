@@ -1,4 +1,5 @@
-from flask import Flask
+from flask import Flask, Response
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from config import Config
 from extensions import db, jwt, bcrypt, migrate
 from core.middleware import register_error_handlers
@@ -33,9 +34,10 @@ def create_app():
 
     app.risk_engine = RiskEngineClient(app.config["RISK_ENGINE_HOST"],app.config["RISK_ENGINE_PORT"])
     app.order_service = OrderService(app.risk_engine)
-    
-    
-    
+
+    @app.route("/metrics")
+    def metrics():
+        return Response(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
 
 
     return app

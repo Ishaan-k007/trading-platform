@@ -7,6 +7,7 @@ from app import create_app
 
 from kafka import KafkaConsumer
 import json,time,os
+from sqlalchemy.exc import IntegrityError
 from config import Config
 from enums import OrderStatus
 from models import user, account, order, position, ledger_entry, market_price, risk_check
@@ -29,7 +30,20 @@ def process_fill(fill_data):
     order_id = fill_data.get("order_id")
     side = fill_data.get("side")
     order_type = fill_data.get("order_type")
-    
+
+    # Idempotency: wal_producer.py saves its file cursor only *after* a
+    # successful Kafka send, so a crash in between replays the last line on
+    # restart. If this fill is already in the DB, skip it rather than crash on
+    # the duplicate primary key (which would wedge every later fill behind it).
+    if db.session.get(order.Order, order_id) is not None:
+        print(f"[fill_consumer] order {order_id} already applied, skipping")
+        return
+
+    acc = account.Account.query.filter_by(user_id=user_id).first()
+    if acc is None:
+        print(f"[fill_consumer] no account for user {user_id}, skipping order {order_id}")
+        return
+
     new_order = order.Order(
         id=order_id,
         user_id=user_id,
@@ -42,7 +56,6 @@ def process_fill(fill_data):
         limit_price=None
     )
     db.session.add(new_order)
-    acc = account.Account.query.filter_by(user_id=user_id).first()
     acc.cash_balance = new_cash
     pos = position.Position.query.filter_by(user_id=user_id, symbol=symbol).first()
     if pos:
@@ -53,7 +66,13 @@ def process_fill(fill_data):
             user_id=user_id, symbol=symbol,
             quantity=new_quantity, average_price=new_avg_price
         ))
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # Lost the race to another delivery of the same fill — the other one
+        # won, this one is a no-op.
+        db.session.rollback()
+        print(f"[fill_consumer] order {order_id} already applied (raced), skipping")
     
 def main():
     app = create_app()

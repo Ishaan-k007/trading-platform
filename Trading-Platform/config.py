@@ -9,6 +9,14 @@ class Config:
 
     SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    # Recover transparently from connections dropped while idle (Postgres idle
+    # timeout, container restart, laptop sleep). pool_pre_ping runs a lightweight
+    # "SELECT 1" before handing out a pooled connection and reconnects if it is
+    # dead; pool_recycle retires connections older than 30 minutes.
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        "pool_pre_ping": True,
+        "pool_recycle": 1800,
+    }
     KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
     KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "order-fills")
     KAFKA_MARKET_TOPIC = os.getenv("KAFKA_MARKET_TOPIC", "market-ticks")

@@ -8,6 +8,12 @@ message PositionEntry {
 
 }
 
+// Deprecated: replaced by the atomic ExecuteOrder RPC below. CheckOrder
+// currently mutates user state and releases its lock before Python calls
+// UpdateState, which re-applies a stale snapshot — that gap is a real race
+// condition on concurrent orders for the same user. Left in place (not
+// deleted) so nothing currently depending on it breaks mid-migration; new
+// code must use ExecuteOrder instead.
 message CheckOrderRequest {
     int32  user_id     = 1;
     string order_id    = 2;
@@ -18,6 +24,7 @@ message CheckOrderRequest {
     double limit_price = 7;
 }
 
+// Deprecated: see CheckOrderRequest.
 message CheckOrderResponse {
     bool   approved   = 1;
     string reason     = 2;
@@ -28,6 +35,12 @@ message CheckOrderResponse {
     double new_quantity = 7;
 }
 
+// Deprecated: replaced by the atomic ExecuteOrder RPC below. UpdateState
+// blindly overwrites cash/quantity/avg price with whatever Python passes
+// back instead of computing the result itself, which is the other half of
+// the CheckOrder/UpdateState race condition. Left in place so nothing
+// currently depending on it breaks mid-migration; new code must use
+// ExecuteOrder instead.
 message UpdateStateRequest {
     int32  user_id           = 1;
     string symbol            = 2;
@@ -41,9 +54,79 @@ message UpdateStateRequest {
     string order_type = 10;
 }
 
+// Deprecated: see UpdateStateRequest.
 message UpdateStateResponse {
     bool   success = 1;
     string message = 2;
+}
+
+// Typed outcome of an ExecuteOrder call, replacing the old
+// bool-approved + free-text-reason pattern from CheckOrderResponse.
+// That pattern is what let a LIMIT order that simply didn't cross the
+// market get reported to the user as "insufficient funds" — Python had
+// no way to distinguish rejection reasons other than string-matching
+// free text that was never actually checked.
+enum OrderResultCode {
+    ORDER_RESULT_UNSPECIFIED = 0;
+    FILLED                   = 1;
+    UNKNOWN_SYMBOL           = 2;
+    LIMIT_NOT_MET            = 3;
+    INSUFFICIENT_FUNDS       = 4;
+    INSUFFICIENT_POSITION    = 5;
+    INVALID_ORDER            = 6;
+    IDEMPOTENCY_CONFLICT     = 7;
+    INTERNAL_ERROR           = 8;
+}
+
+// Executes an order atomically: validates, prices, checks funds/position,
+// writes the WAL entry, and applies the resulting state to the in-memory
+// user record, all under one held per-user lock. Replaces the
+// CheckOrder -> (Python round-trip) -> UpdateState flow, which is where
+// the lost-update race condition lived.
+//
+// Note this request never carries a resulting cash/quantity balance —
+// Python does not compute or send back what the new state should be.
+// C++ owns execution price, risk decision, and state mutation; Python
+// only owns request transport and presentation.
+message ExecuteOrderRequest {
+    // Supplied by the calling strategy/client. Stable across retries —
+    // this is what makes idempotency possible. Never replaced with a
+    // server-generated id before it reaches the engine/WAL.
+    string client_order_id = 1;       // The id the calling strategy made up
+    int32  user_id         = 2;       // Whose account this is
+    string symbol          = 3;
+    string side            = 4;
+    string order_type      = 5;
+    double quantity        = 6;
+    double limit_price     = 7;
+}
+
+message ExecuteOrderResponse {
+    OrderResultCode result = 1;
+
+    // Three distinct identifiers, not one id reused three ways:
+    string client_order_id = 2; // used to check if the same order given by strategy
+    string order_id        = 3; // canonical server-generated order identifier
+    string event_id        = 4; // unique identifier for the committed WAL/Kafka event
+
+    // Only meaningful when result == FILLED.
+    optional double fill_price   = 5;
+    optional double market_price = 6;
+
+    // Only meaningful on a funds/position rejection - lets Python report
+    // the real shortfall instead of computing (and getting wrong) its own.
+    optional double required_cash      = 7;
+    optional double available_cash     = 8;
+    optional double required_quantity  = 9;
+    optional double available_quantity = 10;
+
+    // New balances after a fill, for display only - Python must never
+    // send these back on a later request.
+    optional double new_cash     = 11;
+    optional double new_quantity = 12;
+
+    uint64 account_sequence = 13;
+    string message          = 14;
 }
 
 message LoadUserRequest {
@@ -92,11 +175,22 @@ message OrderBookUpdateResponse {
 }
 
 service TradingService {
+    // Deprecated: replaced by atomic ExecuteOrder. Do not call from new code.
     rpc CheckOrder   (CheckOrderRequest)   returns (CheckOrderResponse);
+    // Deprecated: replaced by atomic ExecuteOrder. Do not call from new code.
     rpc UpdateState  (UpdateStateRequest)  returns (UpdateStateResponse);
+
+    rpc ExecuteOrder (ExecuteOrderRequest) returns (ExecuteOrderResponse);
+
     rpc LoadUser     (LoadUserRequest)     returns (LoadUserResponse);
+
+    // Read-only market-data path - unrelated to order execution and not
+    // being removed. ExecuteOrder does its own internal price lookup
+    // against the same price/order-book store rather than requiring a
+    // separate GetPrice call before every order.
     rpc GetPrice     (GetPriceRequest)     returns (GetPriceResponse);
     rpc GetAllPrices (GetAllPricesRequest) returns (GetAllPricesResponse);
+
     rpc HasUser (HasUserRequest) returns (HasUserResponse);
     rpc UpdateOrderBook (OrderBookUpdateRequest) returns (OrderBookUpdateResponse);
 
