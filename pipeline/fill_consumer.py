@@ -9,6 +9,7 @@ from kafka import KafkaConsumer
 import json,time,os
 from sqlalchemy.exc import IntegrityError
 from config import Config
+from core.money import to_decimal
 from enums import OrderStatus
 from models import user, account, order, position, ledger_entry, market_price, risk_check
 from extensions import db, jwt
@@ -20,11 +21,14 @@ KAFKA_GROUP_ID = os.getenv("KAFKA_GROUP_ID", "order-fill-consumer-group")
 
     
 def process_fill(fill_data):
-    fill_price = fill_data.get("fill_price")
-    quantity = fill_data.get("quantity")
-    new_cash = fill_data.get("new_cash")
-    new_quantity = fill_data.get("new_quantity")
-    new_avg_price = fill_data.get("new_avg_price")
+    # The engine works in doubles and the WAL carries them as JSON numbers.
+    # This is the boundary where they become exact decimals at the platform's
+    # fixed scale - see core/money.py for the rounding policy.
+    fill_price = to_decimal(fill_data.get("fill_price"))
+    quantity = to_decimal(fill_data.get("quantity"))
+    new_cash = to_decimal(fill_data.get("new_cash"))
+    new_quantity = to_decimal(fill_data.get("new_quantity"))
+    new_avg_price = to_decimal(fill_data.get("new_avg_price"))
     user_id = fill_data.get("user_id")
     symbol = fill_data.get("symbol")
     order_id = fill_data.get("order_id")

@@ -7,6 +7,7 @@ from models.account import Account
 from models.ledger_entry import LedgerEntry
 from core.security import hash_password, verify_password
 from core.exceptions import InvalidCredentialsError
+from core.money import ACCOUNT_CURRENCY
 from enums import EntryType
 
 
@@ -27,7 +28,7 @@ class AuthService:
         account = Account(
             user_id=user.id,
             cash_balance=STARTING_BALANCE,
-            currency="GBP",
+            currency=ACCOUNT_CURRENCY,
         )
         db.session.add(account)
         db.session.flush()  # get account.id
@@ -39,7 +40,7 @@ class AuthService:
             entry_type=EntryType.DEPOSIT,
             amount=STARTING_BALANCE,
             running_balance=STARTING_BALANCE,
-            currency="GBP",
+            currency=ACCOUNT_CURRENCY,
             description="Account opening deposit",
         )
         db.session.add(entry)

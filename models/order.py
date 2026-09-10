@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 from extensions import db
 from enums import OrderStatus, OrderSide, OrderType
+from core.money import DECIMAL_PRECISION, DECIMAL_SCALE
 
 
 class Order(db.Model):
@@ -13,10 +14,10 @@ class Order(db.Model):
     symbol           = db.Column(db.String(10), nullable=False)
     side             = db.Column(db.String(4), nullable=False)
     order_type       = db.Column(db.String(6), nullable=False, default=OrderType.MARKET)
-    quantity         = db.Column(db.Numeric(18, 6), nullable=False)
-    limit_price      = db.Column(db.Numeric(18, 6), nullable=True)
-    requested_price  = db.Column(db.Numeric(18, 6), nullable=True)
-    filled_price     = db.Column(db.Numeric(18, 6), nullable=True)
+    quantity         = db.Column(db.Numeric(DECIMAL_PRECISION, DECIMAL_SCALE), nullable=False)
+    limit_price      = db.Column(db.Numeric(DECIMAL_PRECISION, DECIMAL_SCALE), nullable=True)
+    requested_price  = db.Column(db.Numeric(DECIMAL_PRECISION, DECIMAL_SCALE), nullable=True)
+    filled_price     = db.Column(db.Numeric(DECIMAL_PRECISION, DECIMAL_SCALE), nullable=True)
     status           = db.Column(db.String(15), nullable=False,
                                  default=OrderStatus.PENDING)
     rejection_reason = db.Column(db.Text, nullable=True)

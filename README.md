@@ -225,13 +225,42 @@ A retry carrying the same `client_order_id` replays the original outcome
 instead of executing twice. See [docs/order-identifiers.md](docs/order-identifiers.md)
 for what each identifier is and why it exists.
 
+## Accounting rules
+
+Accounts are denominated in **USDT** — the platform trades USDT-quoted pairs and
+performs no FX conversion anywhere. All monetary and quantity columns are
+`numeric(28, 8)`; scale 8 is the smallest unit Binance quotes. Values cross from
+the engine's doubles into exact decimals at the persistence boundary, rounding
+half-up. Short positions are not permitted: the engine rejects a SELL for more
+than the account holds. The policy lives in one place, [core/money.py](core/money.py).
+
+## Documentation
+
+| Document | Covers |
+|---|---|
+| [docs/order-identifiers.md](docs/order-identifiers.md) | `client_order_id`, `order_id`, `event_id`, `account_sequence` — what each is, where it is minted, why four and not one |
+| [docs/testing-execute-order.md](docs/testing-execute-order.md) | The testing strategy: why the race test cannot be a unit test, how the engine tests are made deterministic |
+| [docs/hardening-roadmap.md](docs/hardening-roadmap.md) | Every known gap between this and a production system — the failure, why it is not covered, and how it would be fixed |
+
+Each is also rendered as a PDF alongside its source.
+
 ## Known limitations
+
+Summarised here; [docs/hardening-roadmap.md](docs/hardening-roadmap.md) has the
+full list with failure modes and fixes.
 
 - **Fill persistence is eventually consistent.** The API reports `FILLED` before
   the WAL → Kafka → consumer chain has written the fill to PostgreSQL, so
   `GET /portfolio` can briefly lag a just-placed order.
+- **The engine's WAL write follows the state mutation** rather than preceding
+  it, so a crash between the two loses that fill.
 - **The double-entry ledger is not maintained per trade.** `ledger_entries`
   records only the opening deposit; `risk_checks`, `orders.rejection_reason` and
-  `positions.realised_pnl` are defined but unpopulated.
+  `positions.realised_pnl` are defined but unpopulated — rejections never reach
+  PostgreSQL at all, because only fills flow through the WAL.
+- **Fills always execute at top of book.** Order size is ignored: no walking the
+  book, no slippage, no fees, no partial fills.
+- **One Kafka broker, one partition.** Fine for a single-node demo; not highly
+  available.
 - **GBM price simulation is disabled** (`run_gbm` in `main.cpp`) — pricing comes
   entirely from the live Binance order book.
