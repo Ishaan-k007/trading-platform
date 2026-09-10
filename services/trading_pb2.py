@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rtrading.proto\x12\x07trading\"H\n\rPositionEntry\x12\x0e\n\x06symbol\x18\x01 \x01(\t\x12\x10\n\x08quantity\x18\x02 \x01(\x01\x12\x15\n\raverage_price\x18\x03 \x01(\x01\"\x8f\x01\n\x11\x43heckOrderRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\x05\x12\x10\n\x08order_id\x18\x02 \x01(\t\x12\x0e\n\x06symbol\x18\x03 \x01(\t\x12\x0c\n\x04side\x18\x04 \x01(\t\x12\x12\n\norder_type\x18\x05 \x01(\t\x12\x10\n\x08quantity\x18\x06 \x01(\x01\x12\x13\n\x0blimit_price\x18\x07 \x01(\x01\"\xa9\x01\n\x12\x43heckOrderResponse\x12\x10\n\x08\x61pproved\x18\x01 \x01(\x08\x12\x0e\n\x06reason\x18\x02 \x01(\t\x12\x12\n\nrisk_score\x18\x03 \x01(\x01\x12\x12\n\nfill_price\x18\x04 \x01(\x01\x12\x18\n\x10new_cash_balance\x18\x05 \x01(\x01\x12\x19\n\x11new_average_price\x18\x06 \x01(\x01\x12\x14\n\x0cnew_quantity\x18\x07 \x01(\x01\"\xda\x01\n\x12UpdateStateRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\x05\x12\x0e\n\x06symbol\x18\x02 \x01(\t\x12\x18\n\x10new_cash_balance\x18\x03 \x01(\x01\x12\x14\n\x0cnew_quantity\x18\x04 \x01(\x01\x12\x19\n\x11new_average_price\x18\x05 \x01(\x01\x12\x10\n\x08order_id\x18\x06 \x01(\t\x12\x0c\n\x04side\x18\x07 \x01(\t\x12\x12\n\nfill_price\x18\x08 \x01(\x01\x12\x10\n\x08quantity\x18\t \x01(\x01\x12\x12\n\norder_type\x18\n \x01(\t\"7\n\x13UpdateStateResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\"c\n\x0fLoadUserRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\x05\x12\x14\n\x0c\x63\x61sh_balance\x18\x02 \x01(\x01\x12)\n\tpositions\x18\x03 \x03(\x0b\x32\x16.trading.PositionEntry\"4\n\x10LoadUserResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\"!\n\x0fGetPriceRequest\x12\x0e\n\x06symbol\x18\x01 \x01(\t\"i\n\x10GetPriceResponse\x12\x0e\n\x06symbol\x18\x01 \x01(\t\x12\r\n\x05price\x18\x02 \x01(\x01\x12\x12\n\nupdated_at\x18\x03 \x01(\t\x12\x10\n\x08\x62\x65st_bid\x18\x04 \x01(\x01\x12\x10\n\x08\x62\x65st_ask\x18\x05 \x01(\x01\"\x15\n\x13GetAllPricesRequest\"\x80\x01\n\x14GetAllPricesResponse\x12\x39\n\x06prices\x18\x01 \x03(\x0b\x32).trading.GetAllPricesResponse.PricesEntry\x1a-\n\x0bPricesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x01:\x02\x38\x01\"-\n\nPriceLevel\x12\r\n\x05price\x18\x01 \x01(\x01\x12\x10\n\x08quantity\x18\x02 \x01(\x01\"\x82\x01\n\x16OrderBookUpdateRequest\x12\x0e\n\x06symbol\x18\x01 \x01(\t\x12!\n\x04\x62ids\x18\x02 \x03(\x0b\x32\x13.trading.PriceLevel\x12!\n\x04\x61sks\x18\x03 \x03(\x0b\x32\x13.trading.PriceLevel\x12\x12\n\nupdated_at\x18\x04 \x01(\t\"*\n\x17OrderBookUpdateResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\"!\n\x0eHasUserRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\x05\"!\n\x0fHasUserResponse\x12\x0e\n\x06loaded\x18\x01 \x01(\x08\x32\x84\x04\n\x0eTradingService\x12\x45\n\nCheckOrder\x12\x1a.trading.CheckOrderRequest\x1a\x1b.trading.CheckOrderResponse\x12H\n\x0bUpdateState\x12\x1b.trading.UpdateStateRequest\x1a\x1c.trading.UpdateStateResponse\x12?\n\x08LoadUser\x12\x18.trading.LoadUserRequest\x1a\x19.trading.LoadUserResponse\x12?\n\x08GetPrice\x12\x18.trading.GetPriceRequest\x1a\x19.trading.GetPriceResponse\x12K\n\x0cGetAllPrices\x12\x1c.trading.GetAllPricesRequest\x1a\x1d.trading.GetAllPricesResponse\x12<\n\x07HasUser\x12\x17.trading.HasUserRequest\x1a\x18.trading.HasUserResponse\x12T\n\x0fUpdateOrderBook\x12\x1f.trading.OrderBookUpdateRequest\x1a .trading.OrderBookUpdateResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rtrading.proto\x12\x07trading\"H\n\rPositionEntry\x12\x0e\n\x06symbol\x18\x01 \x01(\t\x12\x10\n\x08quantity\x18\x02 \x01(\x01\x12\x15\n\raverage_price\x18\x03 \x01(\x01\"\x8f\x01\n\x11\x43heckOrderRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\x05\x12\x10\n\x08order_id\x18\x02 \x01(\t\x12\x0e\n\x06symbol\x18\x03 \x01(\t\x12\x0c\n\x04side\x18\x04 \x01(\t\x12\x12\n\norder_type\x18\x05 \x01(\t\x12\x10\n\x08quantity\x18\x06 \x01(\x01\x12\x13\n\x0blimit_price\x18\x07 \x01(\x01\"\xa9\x01\n\x12\x43heckOrderResponse\x12\x10\n\x08\x61pproved\x18\x01 \x01(\x08\x12\x0e\n\x06reason\x18\x02 \x01(\t\x12\x12\n\nrisk_score\x18\x03 \x01(\x01\x12\x12\n\nfill_price\x18\x04 \x01(\x01\x12\x18\n\x10new_cash_balance\x18\x05 \x01(\x01\x12\x19\n\x11new_average_price\x18\x06 \x01(\x01\x12\x14\n\x0cnew_quantity\x18\x07 \x01(\x01\"\xda\x01\n\x12UpdateStateRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\x05\x12\x0e\n\x06symbol\x18\x02 \x01(\t\x12\x18\n\x10new_cash_balance\x18\x03 \x01(\x01\x12\x14\n\x0cnew_quantity\x18\x04 \x01(\x01\x12\x19\n\x11new_average_price\x18\x05 \x01(\x01\x12\x10\n\x08order_id\x18\x06 \x01(\t\x12\x0c\n\x04side\x18\x07 \x01(\t\x12\x12\n\nfill_price\x18\x08 \x01(\x01\x12\x10\n\x08quantity\x18\t \x01(\x01\x12\x12\n\norder_type\x18\n \x01(\t\"7\n\x13UpdateStateResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\"\x98\x01\n\x13\x45xecuteOrderRequest\x12\x17\n\x0f\x63lient_order_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\x05\x12\x0e\n\x06symbol\x18\x03 \x01(\t\x12\x0c\n\x04side\x18\x04 \x01(\t\x12\x12\n\norder_type\x18\x05 \x01(\t\x12\x10\n\x08quantity\x18\x06 \x01(\x01\x12\x13\n\x0blimit_price\x18\x07 \x01(\x01\"\x98\x04\n\x14\x45xecuteOrderResponse\x12(\n\x06result\x18\x01 \x01(\x0e\x32\x18.trading.OrderResultCode\x12\x17\n\x0f\x63lient_order_id\x18\x02 \x01(\t\x12\x10\n\x08order_id\x18\x03 \x01(\t\x12\x10\n\x08\x65vent_id\x18\x04 \x01(\t\x12\x17\n\nfill_price\x18\x05 \x01(\x01H\x00\x88\x01\x01\x12\x19\n\x0cmarket_price\x18\x06 \x01(\x01H\x01\x88\x01\x01\x12\x1a\n\rrequired_cash\x18\x07 \x01(\x01H\x02\x88\x01\x01\x12\x1b\n\x0e\x61vailable_cash\x18\x08 \x01(\x01H\x03\x88\x01\x01\x12\x1e\n\x11required_quantity\x18\t \x01(\x01H\x04\x88\x01\x01\x12\x1f\n\x12\x61vailable_quantity\x18\n \x01(\x01H\x05\x88\x01\x01\x12\x15\n\x08new_cash\x18\x0b \x01(\x01H\x06\x88\x01\x01\x12\x19\n\x0cnew_quantity\x18\x0c \x01(\x01H\x07\x88\x01\x01\x12\x18\n\x10\x61\x63\x63ount_sequence\x18\r \x01(\x04\x12\x0f\n\x07message\x18\x0e \x01(\tB\r\n\x0b_fill_priceB\x0f\n\r_market_priceB\x10\n\x0e_required_cashB\x11\n\x0f_available_cashB\x14\n\x12_required_quantityB\x15\n\x13_available_quantityB\x0b\n\t_new_cashB\x0f\n\r_new_quantity\"c\n\x0fLoadUserRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\x05\x12\x14\n\x0c\x63\x61sh_balance\x18\x02 \x01(\x01\x12)\n\tpositions\x18\x03 \x03(\x0b\x32\x16.trading.PositionEntry\"4\n\x10LoadUserResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\"!\n\x0fGetPriceRequest\x12\x0e\n\x06symbol\x18\x01 \x01(\t\"i\n\x10GetPriceResponse\x12\x0e\n\x06symbol\x18\x01 \x01(\t\x12\r\n\x05price\x18\x02 \x01(\x01\x12\x12\n\nupdated_at\x18\x03 \x01(\t\x12\x10\n\x08\x62\x65st_bid\x18\x04 \x01(\x01\x12\x10\n\x08\x62\x65st_ask\x18\x05 \x01(\x01\"\x15\n\x13GetAllPricesRequest\"\x80\x01\n\x14GetAllPricesResponse\x12\x39\n\x06prices\x18\x01 \x03(\x0b\x32).trading.GetAllPricesResponse.PricesEntry\x1a-\n\x0bPricesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x01:\x02\x38\x01\"-\n\nPriceLevel\x12\r\n\x05price\x18\x01 \x01(\x01\x12\x10\n\x08quantity\x18\x02 \x01(\x01\"\x82\x01\n\x16OrderBookUpdateRequest\x12\x0e\n\x06symbol\x18\x01 \x01(\t\x12!\n\x04\x62ids\x18\x02 \x03(\x0b\x32\x13.trading.PriceLevel\x12!\n\x04\x61sks\x18\x03 \x03(\x0b\x32\x13.trading.PriceLevel\x12\x12\n\nupdated_at\x18\x04 \x01(\t\"*\n\x17OrderBookUpdateResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\"!\n\x0eHasUserRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\x05\"!\n\x0fHasUserResponse\x12\x0e\n\x06loaded\x18\x01 \x01(\x08*\xd6\x01\n\x0fOrderResultCode\x12\x1c\n\x18ORDER_RESULT_UNSPECIFIED\x10\x00\x12\n\n\x06\x46ILLED\x10\x01\x12\x12\n\x0eUNKNOWN_SYMBOL\x10\x02\x12\x11\n\rLIMIT_NOT_MET\x10\x03\x12\x16\n\x12INSUFFICIENT_FUNDS\x10\x04\x12\x19\n\x15INSUFFICIENT_POSITION\x10\x05\x12\x11\n\rINVALID_ORDER\x10\x06\x12\x18\n\x14IDEMPOTENCY_CONFLICT\x10\x07\x12\x12\n\x0eINTERNAL_ERROR\x10\x08\x32\xd1\x04\n\x0eTradingService\x12\x45\n\nCheckOrder\x12\x1a.trading.CheckOrderRequest\x1a\x1b.trading.CheckOrderResponse\x12H\n\x0bUpdateState\x12\x1b.trading.UpdateStateRequest\x1a\x1c.trading.UpdateStateResponse\x12K\n\x0c\x45xecuteOrder\x12\x1c.trading.ExecuteOrderRequest\x1a\x1d.trading.ExecuteOrderResponse\x12?\n\x08LoadUser\x12\x18.trading.LoadUserRequest\x1a\x19.trading.LoadUserResponse\x12?\n\x08GetPrice\x12\x18.trading.GetPriceRequest\x1a\x19.trading.GetPriceResponse\x12K\n\x0cGetAllPrices\x12\x1c.trading.GetAllPricesRequest\x1a\x1d.trading.GetAllPricesResponse\x12<\n\x07HasUser\x12\x17.trading.HasUserRequest\x1a\x18.trading.HasUserResponse\x12T\n\x0fUpdateOrderBook\x12\x1f.trading.OrderBookUpdateRequest\x1a .trading.OrderBookUpdateResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -33,6 +33,8 @@ if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_GETALLPRICESRESPONSE_PRICESENTRY']._loaded_options = None
   _globals['_GETALLPRICESRESPONSE_PRICESENTRY']._serialized_options = b'8\001'
+  _globals['_ORDERRESULTCODE']._serialized_start=2136
+  _globals['_ORDERRESULTCODE']._serialized_end=2350
   _globals['_POSITIONENTRY']._serialized_start=26
   _globals['_POSITIONENTRY']._serialized_end=98
   _globals['_CHECKORDERREQUEST']._serialized_start=101
@@ -43,30 +45,34 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_UPDATESTATEREQUEST']._serialized_end=637
   _globals['_UPDATESTATERESPONSE']._serialized_start=639
   _globals['_UPDATESTATERESPONSE']._serialized_end=694
-  _globals['_LOADUSERREQUEST']._serialized_start=696
-  _globals['_LOADUSERREQUEST']._serialized_end=795
-  _globals['_LOADUSERRESPONSE']._serialized_start=797
-  _globals['_LOADUSERRESPONSE']._serialized_end=849
-  _globals['_GETPRICEREQUEST']._serialized_start=851
-  _globals['_GETPRICEREQUEST']._serialized_end=884
-  _globals['_GETPRICERESPONSE']._serialized_start=886
-  _globals['_GETPRICERESPONSE']._serialized_end=991
-  _globals['_GETALLPRICESREQUEST']._serialized_start=993
-  _globals['_GETALLPRICESREQUEST']._serialized_end=1014
-  _globals['_GETALLPRICESRESPONSE']._serialized_start=1017
-  _globals['_GETALLPRICESRESPONSE']._serialized_end=1145
-  _globals['_GETALLPRICESRESPONSE_PRICESENTRY']._serialized_start=1100
-  _globals['_GETALLPRICESRESPONSE_PRICESENTRY']._serialized_end=1145
-  _globals['_PRICELEVEL']._serialized_start=1147
-  _globals['_PRICELEVEL']._serialized_end=1192
-  _globals['_ORDERBOOKUPDATEREQUEST']._serialized_start=1195
-  _globals['_ORDERBOOKUPDATEREQUEST']._serialized_end=1325
-  _globals['_ORDERBOOKUPDATERESPONSE']._serialized_start=1327
-  _globals['_ORDERBOOKUPDATERESPONSE']._serialized_end=1369
-  _globals['_HASUSERREQUEST']._serialized_start=1371
-  _globals['_HASUSERREQUEST']._serialized_end=1404
-  _globals['_HASUSERRESPONSE']._serialized_start=1406
-  _globals['_HASUSERRESPONSE']._serialized_end=1439
-  _globals['_TRADINGSERVICE']._serialized_start=1442
-  _globals['_TRADINGSERVICE']._serialized_end=1958
+  _globals['_EXECUTEORDERREQUEST']._serialized_start=697
+  _globals['_EXECUTEORDERREQUEST']._serialized_end=849
+  _globals['_EXECUTEORDERRESPONSE']._serialized_start=852
+  _globals['_EXECUTEORDERRESPONSE']._serialized_end=1388
+  _globals['_LOADUSERREQUEST']._serialized_start=1390
+  _globals['_LOADUSERREQUEST']._serialized_end=1489
+  _globals['_LOADUSERRESPONSE']._serialized_start=1491
+  _globals['_LOADUSERRESPONSE']._serialized_end=1543
+  _globals['_GETPRICEREQUEST']._serialized_start=1545
+  _globals['_GETPRICEREQUEST']._serialized_end=1578
+  _globals['_GETPRICERESPONSE']._serialized_start=1580
+  _globals['_GETPRICERESPONSE']._serialized_end=1685
+  _globals['_GETALLPRICESREQUEST']._serialized_start=1687
+  _globals['_GETALLPRICESREQUEST']._serialized_end=1708
+  _globals['_GETALLPRICESRESPONSE']._serialized_start=1711
+  _globals['_GETALLPRICESRESPONSE']._serialized_end=1839
+  _globals['_GETALLPRICESRESPONSE_PRICESENTRY']._serialized_start=1794
+  _globals['_GETALLPRICESRESPONSE_PRICESENTRY']._serialized_end=1839
+  _globals['_PRICELEVEL']._serialized_start=1841
+  _globals['_PRICELEVEL']._serialized_end=1886
+  _globals['_ORDERBOOKUPDATEREQUEST']._serialized_start=1889
+  _globals['_ORDERBOOKUPDATEREQUEST']._serialized_end=2019
+  _globals['_ORDERBOOKUPDATERESPONSE']._serialized_start=2021
+  _globals['_ORDERBOOKUPDATERESPONSE']._serialized_end=2063
+  _globals['_HASUSERREQUEST']._serialized_start=2065
+  _globals['_HASUSERREQUEST']._serialized_end=2098
+  _globals['_HASUSERRESPONSE']._serialized_start=2100
+  _globals['_HASUSERRESPONSE']._serialized_end=2133
+  _globals['_TRADINGSERVICE']._serialized_start=2353
+  _globals['_TRADINGSERVICE']._serialized_end=2946
 # @@protoc_insertion_point(module_scope)

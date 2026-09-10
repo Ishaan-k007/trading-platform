@@ -79,9 +79,8 @@ Or start the whole stack with `scripts/run_all.sh` (see [Running](#running)).
 
 - Docker Desktop
 - Python 3.11+ and [Poetry](https://python-poetry.org/)
-- MSYS2 UCRT64 with CMake, Ninja, gRPC, Protobuf and libpq — only needed to
-  *build* the C++ engine. A prebuilt `risk_engine.exe` may already be in
-  `risk_engine_cpp/build/`.
+- MSYS2 UCRT64 with CMake, Ninja, gRPC, Protobuf and libpq — needed to build
+  the C++ engine. The engine is not checked in; you build it once (below).
 
 MSYS2 UCRT64 packages:
 
@@ -93,19 +92,22 @@ pacman -S mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja \
 
 ## Setup
 
+From a clean checkout, in an **MSYS2 UCRT64 shell**:
+
 ```bash
 cp .env.example .env            # defaults match docker compose as-is
 poetry install
 docker compose up -d            # PostgreSQL + Kafka
-poetry run flask db upgrade     # create tables
+poetry run flask db upgrade     # create tables from an empty database
+bash scripts/build_engine.sh    # build the C++ risk engine
 ```
 
-Build the C++ engine (from an MSYS2 UCRT64 shell) if `risk_engine.exe` isn't
-already present:
-
-```bash
-cd risk_engine_cpp && cmake -S . -B build -G Ninja && ninja -C build
-```
+That's the whole build — no prebuilt binaries, no manual database steps. The
+generated gRPC stubs (`services/trading_pb2*.py`, and the C++ stubs during the
+engine build) are produced from `risk_engine_cpp/proto/trading.proto`; the
+Python ones are checked in, so regenerate them with `bash scripts/gen_proto.sh`
+only if you edit the proto. `scripts/run_all.sh` also runs `build_engine.sh`
+itself the first time if the engine isn't built yet.
 
 ## Running
 

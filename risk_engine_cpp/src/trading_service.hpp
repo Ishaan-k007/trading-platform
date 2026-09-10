@@ -9,8 +9,6 @@
 class TradingServiceImplementation : public trading::TradingService::Service {
 public:
     TradingServiceImplementation(PriceStore* price_store, UserStateStore* user_store, WALWriter* wal_writer, OrderBook* order_book);
-    grpc::Status CheckOrder(grpc::ServerContext* ctx, const trading::CheckOrderRequest* request, trading::CheckOrderResponse* response) override;
-    grpc::Status UpdateState(grpc::ServerContext* ctx, const trading::UpdateStateRequest* request, trading::UpdateStateResponse* response) override;
     grpc::Status LoadUser(grpc::ServerContext* ctx, const trading::LoadUserRequest* request, trading::LoadUserResponse* response) override;
     grpc::Status GetPrice(grpc::ServerContext* ctx, const trading::GetPriceRequest* request, trading::GetPriceResponse* response) override;
     grpc::Status GetAllPrices(grpc::ServerContext* ctx, const trading::GetAllPricesRequest* request, trading::GetAllPricesResponse* response) override;
