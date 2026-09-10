@@ -1,254 +1,229 @@
 # Trading Platform
 
-A distributed paper trading platform built across independently deployable services Python Flask API, a C++ gRPC risk engine, a Kafka event bus, a WebSocket price feed, and a React frontend. Simulates real exchange architecture with in-memory risk checks, live price simulation, and real-time browser updates.
+A paper-trading platform built as a set of independently runnable services: a
+Python Flask API, a C++ gRPC risk engine, a live Binance order-book feed, a
+Kafka-based fill pipeline, an automated strategy runner, and a Streamlit
+dashboard. It models real exchange plumbing — in-memory risk checks on the order
+hot path, a write-ahead log for durability, and event-driven persistence —
+against live market data.
 
 ## Architecture
 
 ```
-Browser (React)
-    ↕ WebSocket          ↕ HTTP/REST
-         │                    │
-WebSocket Service         Flask API
-(price broadcast)         (orders, auth, portfolio)
-         │                    │
-         └──── Kafka ─────────┘
-                │         │
-         "prices"    "trade_filled"
-                │         │
-         C++ Risk Engine (gRPC :50051)
-         ├── GBM price simulation thread
-         ├── In-memory PriceStore (shared_mutex)
-         ├── In-memory UserStateStore (per-user mutex)
-         └── CheckOrder | UpdateState | LoadUser | GetPrice | GetAllPrices
-                              │
-                        PostgreSQL :5433
-                        (users, orders, positions, ledger)
+                 Binance (live order-book WebSocket)
+                          │  depth snapshots, ~100 symbols per connection
+                          ▼
+                 pipeline/orderbook_feed_producer.py
+                          │  UpdateOrderBook (gRPC)
+                          ▼
+  strategy_runner.py   ┌──────────────────────────────┐        ┌────────────────┐
+      │                │      C++ Risk Engine :50051   │        │   PostgreSQL   │
+      │ place_order()  │                              │        │     :5433      │
+      ▼                │  OrderBook      (per-symbol) │        │ users, orders, │
+  Flask API :5000 ─────▶  PriceStore     (shared_mtx) │        │ positions,     │
+  (auth, orders,   gRPC │  UserStateStore (per-user)  │        │ ledger         │
+   portfolio,           │  WAL writer  ───────────┐   │        └────────▲───────┘
+   market)              └─────────────────────────┼───┘                 │
+      │                                           ▼                     │
+      │                                        wal.log                  │
+      ▼                                           │ pipeline/wal_producer.py
+  Streamlit :8501                                 ▼                     │
+  (equity curve,                        Kafka topic "order-fills"       │
+   trades, live P&L)                              │ pipeline/fill_consumer.py
+      ▲                                           └─────────────────────┘
+      │ reads
+  logs/strategy_*.csv  ◀── written by strategy_runner.py
 ```
 
-### Why C++
+### Why a C++ risk engine
 
-Order risk validation runs in a C++ inmemory engine rather than querying PostgreSQL on every order. This reduces CheckOrder latency from ~8ms (DB roundtrip) to ~180μs (RAM lookup) which is a 40x improvement. `shared_mutex` allows thousands of concurrent price reads while the GBM thread writes once per second.
+Order risk checks — *does the user have the cash / the shares?* — run against
+in-memory state in a C++ process instead of hitting PostgreSQL on every order.
+`PriceStore` and `OrderBook` use `shared_mutex` so many order checks read prices
+concurrently while the Binance feed updates them; `UserStateStore` uses one mutex
+per user so different users' orders never block each other.
 
-### Why Kafka
+### Why a write-ahead log + Kafka
 
-After a trade fills, Flask publishes a `trade_filled` event to Kafka rather than calling the C++ engine synchronously. The C++ engine and WebSocket service consume independently, decoupling state synchronisation from the HTTP request lifecycle and making each service independently restartable.
+When an order fills, the engine appends it to `wal.log` (a write-ahead log) and
+returns. A separate process (`wal_producer.py`) tails that file and publishes
+each fill to the Kafka topic `order-fills`; `fill_consumer.py` reads that topic
+and applies the fill to PostgreSQL. This keeps durable persistence off the
+order's hot path and lets other consumers (analytics, notifications) read the
+same fill stream without touching the engine.
 
-### Why WebSockets
+### Why the Binance feed is sharded
 
-GBM produces price updates every second. Without WebSockets, 200 users would generate 200 HTTP polls per second. With WebSockets, one Kafka consumer broadcasts to all 200 connections simultaneously so that there are zero wasted requests.
-
----
+One WebSocket connection can't carry every USDT trading pair, and putting them
+all on one connection means a single dropped connection blacks out every symbol.
+The feed splits symbols into shards of ~100, one connection (and one thread)
+each, so a dropped connection only interrupts its own shard.
 
 ## Services
 
-| Service | Language | Port |
-|---|---|---|
-| Flask API | Python | 5000 |
-| C++ Risk Engine | C++17 | 50051 (gRPC) |
-| PostgreSQL | Docker | 5433 |
-| Redpanda (Kafka) | Docker | 9092 |
-| WebSocket Service | Python | 5001 |
-| Prometheus | Docker | 9090 |
-| Grafana | Docker | 3000 |
-| React Frontend | Node.js | 3001 |
+| Service | Language | Port | Start command |
+|---|---|---|---|
+| PostgreSQL | Docker | 5433 | `docker compose up -d` |
+| Kafka | Docker | 9092 | `docker compose up -d` |
+| C++ risk engine | C++17 | 50051 (gRPC) | `risk_engine_cpp/build/risk_engine.exe` |
+| Binance order-book feed | Python | — | `python pipeline/orderbook_feed_producer.py` |
+| WAL producer | Python | — | `python pipeline/wal_producer.py` |
+| Fill consumer | Python | — | `python pipeline/fill_consumer.py` |
+| Flask API | Python | 5000 | `flask run` |
+| Strategy runner | Python | — | `python strategy_runner.py` |
+| Streamlit dashboard | Python | 8501 | `streamlit run streamlit_app.py` |
 
----
+Or start the whole stack with `scripts/run_all.sh` (see [Running](#running)).
 
 ## Prerequisites
 
 - Docker Desktop
-- MSYS2 UCRT64 (for building C++)
-- Python 3.11+
-- Node.js 18+
-- CMake 3.20+, Ninja
+- Python 3.11+ and [Poetry](https://python-poetry.org/)
+- MSYS2 UCRT64 with CMake, Ninja, gRPC, Protobuf and libpq — only needed to
+  *build* the C++ engine. A prebuilt `risk_engine.exe` may already be in
+  `risk_engine_cpp/build/`.
 
-MSYS2 packages required:
+MSYS2 UCRT64 packages:
+
 ```bash
-pacman -S mingw-w64-ucrt-x86_64-cmake \
-          mingw-w64-ucrt-x86_64-ninja \
-          mingw-w64-ucrt-x86_64-grpc \
-          mingw-w64-ucrt-x86_64-protobuf \
+pacman -S mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja \
+          mingw-w64-ucrt-x86_64-grpc mingw-w64-ucrt-x86_64-protobuf \
           mingw-w64-ucrt-x86_64-postgresql
 ```
 
----
-
-## Running the Platform
-
-### 1. Start infrastructure (PostgreSQL + Redpanda)
+## Setup
 
 ```bash
-docker-compose up -d
-```
-
-### 2. Run database migrations
-
-```bash
-cd Trading-Platform
+cp .env.example .env            # defaults match docker compose as-is
 poetry install
-poetry run flask db upgrade
+docker compose up -d            # PostgreSQL + Kafka
+poetry run flask db upgrade     # create tables
 ```
 
-### 3. Seed market data
+Build the C++ engine (from an MSYS2 UCRT64 shell) if `risk_engine.exe` isn't
+already present:
 
 ```bash
-docker exec -it trading-platform-postgres-1 psql -U trading_user -d trading_platform
+cd risk_engine_cpp && cmake -S . -B build -G Ninja && ninja -C build
 ```
 
-```sql
-INSERT INTO market_prices (symbol, price, volatility, drift, updated_at) VALUES
-('AAPL', 182.50, 0.02, 0.0001, NOW()),
-('MSFT', 415.00, 0.018, 0.0001, NOW()),
-('TSLA', 245.00, 0.04, 0.0001, NOW()),
-('GOOGL', 175.00, 0.022, 0.0001, NOW()),
-('AMZN', 195.00, 0.025, 0.0001, NOW());
-\q
-```
+## Running
 
-### 4. Build the C++ risk engine (MSYS2 UCRT64)
+### Option A — one script (recommended)
+
+Run from an **MSYS2 UCRT64 shell** — the C++ engine needs the UCRT64 runtime DLLs
+on `PATH`, and only that shell provides them. The script locates Docker and the
+Poetry virtualenv itself, so neither has to be on your `PATH`.
 
 ```bash
-cd risk_engine_cpp
-mkdir -p build && cd build
-cmake .. -G "Ninja"
-ninja
+bash scripts/run_all.sh            # start everything, in dependency order
+bash scripts/run_all.sh --fresh    # same, but wipe wal.log + strategy CSVs first
+bash scripts/stop_all.sh           # stop everything, including the Docker containers
 ```
 
-### 5. Start the C++ risk engine (MSYS2 UCRT64)
+**Docker Desktop must already be running.** The script prints `1/8 … 8/8` and
+waits for Postgres, the gRPC engine (`:50051`), and Flask (`:5000`) to actually
+accept connections before continuing; it ends with `Up.` and the dashboard/API
+URLs. Per-service output goes to `logs/<name>.out.log` and `logs/<name>.err.log`
+— if a step reports `TIMEOUT`, read that service's `.err.log`.
 
-```bash
-./risk_engine.exe
-```
+### Option B — manually, in order
 
-Expected output:
-```
-Connected to PostgreSQL
-Loaded 5 symbols into PriceStore
-gRPC server listening on port 50051
-```
+Each in its own terminal, from the repo root:
 
-### 6. Start the Flask API
+1. `docker compose up -d`
+2. `risk_engine_cpp/build/risk_engine.exe` (MSYS2 UCRT64 shell) — wait for `gRPC server listening on port 50051`
+3. `poetry run python pipeline/orderbook_feed_producer.py` — wait for `[shard 0] Connected`
+4. `poetry run python pipeline/wal_producer.py`
+5. `poetry run python pipeline/fill_consumer.py`
+6. `poetry run flask run`
+7. `poetry run python strategy_runner.py` — begins placing paper trades on `BTCUSDT`
+8. `poetry run streamlit run streamlit_app.py`
 
-```bash
-cd Trading-Platform
-poetry run flask run
-```
+Stop: `Ctrl-C` each terminal, then `docker compose stop`.
 
-### 7. Start the WebSocket service
+Run the engine from the repo root so its `wal.log` and `wal_producer.py` resolve
+to the same file. The engine seeds `PriceStore` from `market_prices` on startup,
+but the Binance feed supplies live prices for every USDT pair — you don't need to
+seed `market_prices` unless you want non-crypto symbols.
 
-```bash
-poetry run python websocket_service.py
-```
+## Using it
 
-### 8. Start the React frontend
+Once the stack is up:
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+1. **Open the dashboard** at <http://localhost:8501> and register / log in with a
+   platform account (or Google).
+2. **The strategy bot trades on its own.** `strategy_runner.py` polls BTCUSDT and
+   fires a paper BUY when the price falls 0.5% below its reference, then a SELL
+   when it recovers 0.5%. The first trade can take a while — follow
+   `logs/strategy_runner.out.log`. The dashboard's equity curve and trade log
+   fill in as it runs.
+3. **Or place orders yourself** against the API:
 
-Open [http://localhost:3001](http://localhost:3001)
+   ```bash
+   API=http://localhost:5000/api/v1
 
----
+   curl -s -X POST $API/auth/register -H 'Content-Type: application/json' \
+     -d '{"email":"me@test.local","username":"me","password":"password123"}'
 
-## Monitoring
+   TOKEN=$(curl -s -X POST $API/auth/login -H 'Content-Type: application/json' \
+     -d '{"username":"me","password":"password123"}' \
+     | python -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 
-Prometheus scrapes metrics from both the Flask API and C++ risk engine every 15 seconds.
+   curl -s -X POST $API/orders -H "Authorization: Bearer $TOKEN" \
+     -H 'Content-Type: application/json' \
+     -d '{"order_id":"order-1","symbol":"BTCUSDT","side":"BUY","quantity":0.001,"order_type":"MARKET"}'
 
-- Prometheus: [http://localhost:9090](http://localhost:9090)
-- Grafana: [http://localhost:3000](http://localhost:3000) (admin / admin)
+   curl -s $API/portfolio -H "Authorization: Bearer $TOKEN"
+   curl -s $API/orders    -H "Authorization: Bearer $TOKEN"
+   ```
 
-Key metrics tracked:
-- `checkorder_latency_us` — CheckOrder duration in microseconds
-- `orders_per_second` — order throughput
-- `gbm_tick_rate` — GBM simulation frequency
-- `flask_request_latency_seconds` — HTTP endpoint latency
-- `grpc_call_latency_seconds` — Flask → C++ gRPC call duration
+   An order returns `FILLED` right away; it appears in PostgreSQL a moment later,
+   once the WAL → Kafka → consumer chain has run (see
+   [Known limitations](#known-limitations)).
 
----
+## API
 
-## API Endpoints
+Base URL `http://localhost:5000/api/v1`. Trading and portfolio routes require a
+JWT from `/auth/login`.
 
-### Auth
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | `/auth/register` | Register new user |
-| POST | `/auth/login` | Login, returns JWT |
-| POST | `/auth/refresh` | Refresh access token |
-
-### Trading
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/orders` | Place buy/sell order |
+| POST | `/auth/register` | Create an account (starts with 10,000 cash) |
+| POST | `/auth/login` | Returns access + refresh tokens |
+| POST | `/auth/refresh` | New access token from a refresh token |
+| POST | `/orders` | Place a BUY/SELL, MARKET/LIMIT order |
 | GET | `/orders` | Order history |
-| GET | `/portfolio` | Current positions + cash |
-| GET | `/portfolio/history` | P&L history |
+| GET | `/portfolio` | Cash + positions, marked to live prices |
+| GET | `/market/prices` | All current prices |
+| GET | `/market/prices/<symbol>` | One symbol's price |
 
-### Market Data
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/prices` | All current prices |
-| GET | `/prices/<symbol>` | Single symbol price |
+`GET /metrics` (on the Flask app, no prefix) exposes Prometheus-format metrics —
+currently `checkorder_latency_seconds`.
 
----
+## Order flow
 
-## Project Structure
+1. `POST /orders` → `OrderService.place_order` loads the user into the engine if
+   needed, then calls `CheckOrder` (gRPC).
+2. The engine prices the order from the order book, checks funds/position,
+   updates its in-memory state, and returns the fill.
+3. `OrderService` calls `UpdateState`; the engine appends the fill to `wal.log`.
+4. The API responds `201 FILLED`.
+5. Asynchronously: `wal_producer.py` → Kafka `order-fills` → `fill_consumer.py`
+   → PostgreSQL (`orders`, `accounts`, `positions`).
 
-```
-Trading-Platform/
-├── app.py                      # Flask app factory
-├── config.py                   # Environment config
-├── docker-compose.yml          # PostgreSQL + Redpanda + Prometheus + Grafana
-├── routes/
-│   ├── auth_routes.py
-│   ├── order_routes.py
-│   ├── portfolio_routes.py
-│   └── market_routes.py
-├── services/
-│   ├── auth_service.py
-│   ├── order_service.py
-│   ├── risk_engine_client.py   # gRPC client wrapping C++ calls
-│   └── kafka_service.py        # Kafka producer/consumer
-├── models/
-│   ├── user.py
-│   ├── account.py
-│   ├── order.py
-│   ├── position.py
-│   ├── market_price.py
-│   └── ledger_entry.py
-├── websocket_service.py        # Kafka consumer → WebSocket broadcast
-├── risk_engine_cpp/
-│   ├── proto/trading.proto     # gRPC service contract
-│   ├── src/
-│   │   ├── main.cpp            # Entry point, DB seed, GBM thread, gRPC server
-│   │   ├── price_store.hpp/cpp # Thread-safe in-memory price cache
-│   │   ├── user_state_store.hpp/cpp  # Per-user cash + positions
-│   │   └── trading_service.hpp/cpp   # gRPC RPC implementations
-│   └── CMakeLists.txt
-└── frontend/
-    ├── src/
-    │   ├── pages/
-    │   │   ├── Dashboard.tsx
-    │   │   ├── Portfolio.tsx
-    │   │   └── Trade.tsx
-    │   └── components/
-    │       ├── PriceBoard.tsx  # WebSocket live prices
-    │       └── OrderForm.tsx
-    └── package.json
-```
+## Known limitations
 
----
-
-## Environment Variables
-
-Copy `.env.example` to `.env`:
-
-```
-FLASK_APP=app.py
-FLASK_ENV=development
-DATABASE_URL=postgresql://trading_user:trading_pass@localhost:5433/trading_platform
-JWT_SECRET_KEY=your-secret-key
-KAFKA_BROKER=localhost:9092
-RISK_ENGINE_HOST=localhost:50051
-```
+- **`CheckOrder` / `UpdateState` is a two-phase, non-atomic flow.** Between the
+  two calls a second order for the same user can interleave, and `UpdateState`
+  overwrites in-memory state with a stale snapshot — a lost-update race. The fix
+  is designed as a single atomic `ExecuteOrder` RPC (see
+  `risk_engine_cpp/proto/trading.proto`) but is not yet implemented.
+- **Fill persistence is eventually consistent.** The API reports `FILLED` before
+  the WAL → Kafka → consumer chain has written the fill to PostgreSQL, so
+  `GET /portfolio` can briefly lag a just-placed order.
+- **The double-entry ledger is not maintained per trade.** `ledger_entries`
+  records only the opening deposit; `risk_checks`, `orders.rejection_reason` and
+  `positions.realised_pnl` are defined but unpopulated.
+- **GBM price simulation is disabled** (`run_gbm` in `main.cpp`) — pricing comes
+  entirely from the live Binance order book.
