@@ -18,8 +18,11 @@ def get_portfolio():
     positions = Position.query.filter_by(user_id=user_id).all()
     for position in positions:
         price_data = current_app.risk_engine.get_price(position.symbol)
+        # price comes back as a float; quantity is a Decimal from the DB, and
+        # Python won't multiply the two. Mark to market in float — every value
+        # in the response is float()'d anyway.
         position.current_price = price_data["price"]
-        position.market_value = position.current_price * position.quantity
+        position.market_value = position.current_price * float(position.quantity)
     return jsonify({
         "cash_balance": float(account.cash_balance),
         "positions": [
