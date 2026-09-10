@@ -14,7 +14,10 @@ WALWriter::WALWriter(const std::string& path) : file(path, std::ios::app | std::
 void WALWriter::write_fill(int user_id, const std::string& order_id, const std::string& symbol,
                 const std::string& side, const std::string& order_type,
                 double quantity, double fill_price,
-                double new_cash, double new_quantity, double new_avg_price)
+                double new_cash, double new_quantity, double new_avg_price,
+                const std::string& client_order_id, const std::string& event_id,
+                uint64_t account_sequence)
+
 
 {
    auto time_stamp = std::chrono::system_clock::now().time_since_epoch().count();
@@ -30,6 +33,9 @@ void WALWriter::write_fill(int user_id, const std::string& order_id, const std::
    << ",\"new_cash\":"      << new_cash
    << ",\"new_quantity\":"  << new_quantity
    << ",\"new_avg_price\":" << new_avg_price
+   << ",\"client_order_id\":\"" << client_order_id << "\""
+   << ",\"event_id\":\""        << event_id        << "\""
+   << ",\"account_sequence\":"  << account_sequence
    << ",\"timestamp\":"     << time_stamp
    << "}\n";
 

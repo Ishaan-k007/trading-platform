@@ -44,6 +44,11 @@ class TradingServiceStub:
                 request_serializer=trading__pb2.UpdateStateRequest.SerializeToString,
                 response_deserializer=trading__pb2.UpdateStateResponse.FromString,
                 _registered_method=True)
+        self.ExecuteOrder = channel.unary_unary(
+                '/trading.TradingService/ExecuteOrder',
+                request_serializer=trading__pb2.ExecuteOrderRequest.SerializeToString,
+                response_deserializer=trading__pb2.ExecuteOrderResponse.FromString,
+                _registered_method=True)
         self.LoadUser = channel.unary_unary(
                 '/trading.TradingService/LoadUser',
                 request_serializer=trading__pb2.LoadUserRequest.SerializeToString,
@@ -75,12 +80,20 @@ class TradingServiceServicer:
     """Missing associated documentation comment in .proto file."""
 
     def CheckOrder(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """Deprecated: replaced by atomic ExecuteOrder. Do not call from new code.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def UpdateState(self, request, context):
+        """Deprecated: replaced by atomic ExecuteOrder. Do not call from new code.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ExecuteOrder(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -93,7 +106,11 @@ class TradingServiceServicer:
         raise NotImplementedError('Method not implemented!')
 
     def GetPrice(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """Read-only market-data path - unrelated to order execution and not
+        being removed. ExecuteOrder does its own internal price lookup
+        against the same price/order-book store rather than requiring a
+        separate GetPrice call before every order.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -128,6 +145,11 @@ def add_TradingServiceServicer_to_server(servicer, server):
                     servicer.UpdateState,
                     request_deserializer=trading__pb2.UpdateStateRequest.FromString,
                     response_serializer=trading__pb2.UpdateStateResponse.SerializeToString,
+            ),
+            'ExecuteOrder': grpc.unary_unary_rpc_method_handler(
+                    servicer.ExecuteOrder,
+                    request_deserializer=trading__pb2.ExecuteOrderRequest.FromString,
+                    response_serializer=trading__pb2.ExecuteOrderResponse.SerializeToString,
             ),
             'LoadUser': grpc.unary_unary_rpc_method_handler(
                     servicer.LoadUser,
@@ -209,6 +231,33 @@ class TradingService:
             '/trading.TradingService/UpdateState',
             trading__pb2.UpdateStateRequest.SerializeToString,
             trading__pb2.UpdateStateResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ExecuteOrder(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/trading.TradingService/ExecuteOrder',
+            trading__pb2.ExecuteOrderRequest.SerializeToString,
+            trading__pb2.ExecuteOrderResponse.FromString,
             options,
             channel_credentials,
             insecure,

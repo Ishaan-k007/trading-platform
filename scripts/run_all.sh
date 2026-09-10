@@ -110,7 +110,12 @@ echo "2/8  database migrations"
 flask db upgrade
 
 echo "3/8  C++ risk engine"
-start risk_engine "$ROOT/risk_engine_cpp/build/risk_engine.exe"
+ENGINE="$ROOT/risk_engine_cpp/build/risk_engine.exe"
+if [[ ! -x "$ENGINE" ]]; then
+  echo "  engine not built yet - running scripts/build_engine.sh"
+  bash "$ROOT/scripts/build_engine.sh"
+fi
+start risk_engine "$ENGINE"
 wait_for "gRPC :50051" port_open 50051
 
 echo "4/8  Binance order-book feed"

@@ -79,9 +79,8 @@ Or start the whole stack with `scripts/run_all.sh` (see [Running](#running)).
 
 - Docker Desktop
 - Python 3.11+ and [Poetry](https://python-poetry.org/)
-- MSYS2 UCRT64 with CMake, Ninja, gRPC, Protobuf and libpq — only needed to
-  *build* the C++ engine. A prebuilt `risk_engine.exe` may already be in
-  `risk_engine_cpp/build/`.
+- MSYS2 UCRT64 with CMake, Ninja, gRPC, Protobuf and libpq — needed to build
+  the C++ engine. The engine is not checked in; you build it once (below).
 
 MSYS2 UCRT64 packages:
 
@@ -93,19 +92,22 @@ pacman -S mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja \
 
 ## Setup
 
+From a clean checkout, in an **MSYS2 UCRT64 shell**:
+
 ```bash
 cp .env.example .env            # defaults match docker compose as-is
 poetry install
 docker compose up -d            # PostgreSQL + Kafka
-poetry run flask db upgrade     # create tables
+poetry run flask db upgrade     # create tables from an empty database
+bash scripts/build_engine.sh    # build the C++ risk engine
 ```
 
-Build the C++ engine (from an MSYS2 UCRT64 shell) if `risk_engine.exe` isn't
-already present:
-
-```bash
-cd risk_engine_cpp && cmake -S . -B build -G Ninja && ninja -C build
-```
+That's the whole build — no prebuilt binaries, no manual database steps. The
+generated gRPC stubs (`services/trading_pb2*.py`, and the C++ stubs during the
+engine build) are produced from `risk_engine_cpp/proto/trading.proto`; the
+Python ones are checked in, so regenerate them with `bash scripts/gen_proto.sh`
+only if you edit the proto. `scripts/run_all.sh` also runs `build_engine.sh`
+itself the first time if the engine isn't built yet.
 
 ## Running
 
@@ -199,26 +201,32 @@ JWT from `/auth/login`.
 | GET | `/market/prices/<symbol>` | One symbol's price |
 
 `GET /metrics` (on the Flask app, no prefix) exposes Prometheus-format metrics —
-currently `checkorder_latency_seconds`.
+currently `execute_order_latency_seconds`.
 
 ## Order flow
 
 1. `POST /orders` → `OrderService.place_order` loads the user into the engine if
-   needed, then calls `CheckOrder` (gRPC).
-2. The engine prices the order from the order book, checks funds/position,
-   updates its in-memory state, and returns the fill.
-3. `OrderService` calls `UpdateState`; the engine appends the fill to `wal.log`.
+   needed, then makes a **single** `ExecuteOrder` call (gRPC).
+2. Holding that user's lock for the whole operation, the engine validates the
+   request, prices it from the order book, checks funds/position, computes the
+   new balances, appends the fill to `wal.log`, applies the change to its
+   in-memory state, and caches the result under the caller's `client_order_id`.
+   The lock is never released mid-way, so concurrent orders for the same user
+   cannot interleave and overwrite each other.
+3. The engine returns a typed result (`FILLED`, `INSUFFICIENT_FUNDS`,
+   `LIMIT_NOT_MET`, `IDEMPOTENCY_CONFLICT`, …). Python maps it to an HTTP
+   response and computes no balances of its own.
 4. The API responds `201 FILLED`.
-5. Asynchronously: `wal_producer.py` → Kafka `order-fills` → `fill_consumer.py`
-   → PostgreSQL (`orders`, `accounts`, `positions`).
+5. Asynchronously: `wal_producer.py` → Kafka `order-fills` (keyed by `user_id`,
+   so one user's fills stay ordered) → `fill_consumer.py` → PostgreSQL
+   (`orders`, `accounts`, `positions`).
+
+A retry carrying the same `client_order_id` replays the original outcome
+instead of executing twice. See [docs/order-identifiers.md](docs/order-identifiers.md)
+for what each identifier is and why it exists.
 
 ## Known limitations
 
-- **`CheckOrder` / `UpdateState` is a two-phase, non-atomic flow.** Between the
-  two calls a second order for the same user can interleave, and `UpdateState`
-  overwrites in-memory state with a stale snapshot — a lost-update race. The fix
-  is designed as a single atomic `ExecuteOrder` RPC (see
-  `risk_engine_cpp/proto/trading.proto`) but is not yet implemented.
 - **Fill persistence is eventually consistent.** The API reports `FILLED` before
   the WAL → Kafka → consumer chain has written the fill to PostgreSQL, so
   `GET /portfolio` can briefly lag a just-placed order.

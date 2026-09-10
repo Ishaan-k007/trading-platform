@@ -74,3 +74,19 @@ class RiskEngineUnavailableError(TradingError):
     def __init__(self) -> None:
         super().__init__("Risk engine is currently unavailable.")
 
+class LimitNotMetError(TradingError):
+    http_status = 422
+    error_code = "LIMIT_NOT_MET"
+
+    def __init__(self, side: str, limit_price, market_price) -> None:
+        super().__init__(
+            f"{side} LIMIT at {limit_price} did not cross the market (currently {market_price})."
+        )
+
+
+class InvalidOrderError(TradingError):
+    http_status = 400
+    error_code = "INVALID_ORDER"
+
+    def __init__(self, message: str = "Order was rejected as invalid by the risk engine.") -> None:
+        super().__init__(message)
