@@ -282,6 +282,88 @@ class MarketReader:
             return list(pool.map(fetch, symbols))
 
 
+#: How long the database may sit behind the execution tape, with no progress
+#: at all, before the pipeline is called stalled rather than merely lagging.
+#: Normal WAL -> Kafka -> consumer latency is well under a second; this is
+#: generous enough that ordinary catch-up never trips it.
+PIPELINE_STALL_SECONDS = 45.0
+
+
+def pipeline_health(tape_fills, persisted_fills, previous, now,
+                    stall_seconds=PIPELINE_STALL_SECONDS) -> dict:
+    """Compare what the engine filled against what reached the database.
+
+    These two numbers come from opposite ends of the pipeline. `tape_fills` is
+    what the strategy runner logged the moment the engine filled an order.
+    `persisted_fills` is what survived the WAL -> Kafka -> fill_consumer ->
+    PostgreSQL journey. Under normal operation the second trails the first by a
+    fraction of a second and then catches up.
+
+    When they diverge and *stay* diverged, something in that chain has stopped:
+    a dead consumer, a down broker, a wedged transaction. That failure is
+    otherwise close to invisible, because every other part of the system
+    carries on - the engine keeps filling, the runner keeps logging, and the
+    charts keep drawing from the CSVs. The only outward sign is a cash balance
+    that silently stops moving.
+
+    A gap alone is not evidence of a problem, so this tracks whether the
+    database is still making progress. Any increase in `persisted_fills` counts
+    as progress and restarts the clock; only a gap that goes nowhere for
+    `stall_seconds` is reported as stalled.
+
+    Args:
+        tape_fills: Number of fills in the strategy trade log.
+        persisted_fills: Number of FILLED orders in the database, or None if
+            the database could not be read.
+        previous: The dict returned by the last call, or None on the first.
+        now: Current time, as a float monotonic-style timestamp.
+        stall_seconds: Seconds without progress before reporting "stalled".
+
+    Returns:
+        dict with `state` (one of "unknown", "synced", "catching-up",
+        "stalled"), `gap`, `persisted`, `tape`, `stalled_seconds`, and
+        `progress_at` - pass the whole dict back as `previous` next time.
+    """
+    unchanged = {
+        "state": "unknown",
+        "gap": None,
+        "persisted": persisted_fills,
+        "tape": tape_fills,
+        "stalled_seconds": 0.0,
+        "progress_at": now,
+    }
+    if persisted_fills is None:
+        # The database read failed. That is reported on its own card; guessing
+        # at a gap from a number we do not have would be worse than silence.
+        return unchanged
+
+    gap = tape_fills - persisted_fills
+    last_persisted = (previous or {}).get("persisted")
+    progress_at = (previous or {}).get("progress_at", now)
+
+    # Progress is any forward movement in the database, or having caught up.
+    if gap <= 0 or last_persisted is None or persisted_fills > last_persisted:
+        progress_at = now
+
+    stalled_seconds = max(0.0, now - progress_at)
+
+    if gap <= 0:
+        state = "synced"
+    elif stalled_seconds >= stall_seconds:
+        state = "stalled"
+    else:
+        state = "catching-up"
+
+    return {
+        "state": state,
+        "gap": gap,
+        "persisted": persisted_fills,
+        "tape": tape_fills,
+        "stalled_seconds": stalled_seconds,
+        "progress_at": progress_at,
+    }
+
+
 def database_status(engine, username: str) -> dict:
     """One read transaction, scoped to the configured shared strategy account."""
     from sqlalchemy import text

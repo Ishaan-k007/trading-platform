@@ -20,6 +20,7 @@ from dashboard_data import (
     age_seconds,
     database_status,
     parse_symbols,
+    pipeline_health,
     read_log,
     sample_session,
     summarize_trades,
@@ -60,6 +61,9 @@ h3 {font-size:.94rem!important;letter-spacing:1.3px;text-transform:uppercase;bor
 .mode-banner {padding:11px 14px;border:1px solid #4c3716;border-left:3px solid #ffa500;background:#17130c;font-size:11px;line-height:1.65;margin:8px 0 14px}
 .mode-banner strong {letter-spacing:1px;color:#ffc263}
 .position-banner {padding:12px 14px;border:1px solid #25343a;border-left:3px solid #22d3ee;background:#0c161b;font-size:12px;margin-bottom:15px}
+.alarm-banner {padding:12px 14px;border:1px solid #5a1f1c;border-left:3px solid #ff3b30;background:#190c0b;font-size:12px;line-height:1.7;margin:0 0 14px}
+.alarm-banner strong {letter-spacing:1.4px;color:#ff6b60}
+.alarm-banner code {background:#2a1210;padding:1px 5px;border-radius:3px;color:#ffa79f;font-size:11px}
 @media(max-width:1000px){.market-grid,.health-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:600px){.market-grid,.health-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.market-price{font-size:20px}.block-container{padding-left:1rem;padding-right:1rem}}
 </style>
@@ -290,6 +294,34 @@ def render_health(mode, quotes, status, trades, clock):
                 seen[quote["symbol"]] = sample_id
         st.session_state.quote_latencies = samples[-120:]
         latency = statistics.median(samples[-120:]) if samples else None
+
+        # Compare the two ends of the pipeline. A dead fill_consumer or a down
+        # broker leaves everything else looking healthy, so the divergence
+        # between "what the engine filled" and "what reached the database" is
+        # the only signal the dashboard can actually see.
+        pipeline = pipeline_health(
+            tape_fills=len(trades),
+            persisted_fills=status["fills"],
+            previous=st.session_state.get("pipeline_health"),
+            now=time.monotonic(),
+        )
+        st.session_state.pipeline_health = pipeline
+
+        pipeline_value, pipeline_detail, pipeline_color = {
+            "synced": ("IN SYNC", "Database matches the execution tape", GREEN),
+            "catching-up": (
+                f"+{pipeline['gap']} PENDING",
+                "Fills in flight through Kafka",
+                AMBER,
+            ),
+            "stalled": (
+                f"+{pipeline['gap']} STALLED",
+                f"No progress for {age_label(pipeline['stalled_seconds'])}",
+                RED,
+            ),
+            "unknown": ("—", "Database not readable", MUTED),
+        }[pipeline["state"]]
+
         items = [
             (
                 "Execution engine",
@@ -305,9 +337,17 @@ def render_health(mode, quotes, status, trades, clock):
             ),
             (
                 "Persisted fills",
-                str(status["fills"]) if status["fills"] is not None else "—",
-                "Strategy account · database",
+                f"{status['fills']} / {len(trades)}"
+                if status["fills"] is not None
+                else "—",
+                "Database · execution tape",
                 CYAN,
+            ),
+            (
+                "Fill pipeline",
+                pipeline_value,
+                pipeline_detail,
+                pipeline_color,
             ),
             (
                 "Quote RPC p50",
@@ -354,8 +394,19 @@ def render_health(mode, quotes, status, trades, clock):
         '<div class="health-grid">' + "".join(cards) + "</div>", unsafe_allow_html=True
     )
     if mode == MODES[0]:
+        if pipeline["state"] == "stalled":
+            st.markdown(
+                f'<div class="alarm-banner"><strong>FILL PIPELINE STALLED</strong><br>'
+                f'The engine has filled {escape(str(pipeline["tape"]))} orders but only '
+                f'{escape(str(pipeline["persisted"]))} reached the database, and nothing '
+                f'has been written for {escape(age_label(pipeline["stalled_seconds"]))}. '
+                f'Cash and position figures below are stale. Check that '
+                f'<code>fill_consumer</code> is running and that the Kafka broker is up — '
+                f'<code>logs/fill_consumer.err.log</code>.</div>',
+                unsafe_allow_html=True,
+            )
         st.caption(
-            "Quote RPC p50 measures dashboard → engine round trips, not order-execution latency. Persisted fills can lag the strategy log; Kafka health is not inferred from these checks."
+            "Quote RPC p50 measures dashboard → engine round trips, not order-execution latency. Persisted fills normally lag the execution tape briefly; the pipeline card reports a gap that stops closing, which is the visible symptom of a stopped consumer or broker."
         )
 
 
