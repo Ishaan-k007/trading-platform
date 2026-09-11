@@ -40,6 +40,12 @@ class Strategy(ABC):
     def on_price(self, symbol: str, price: float) -> list[OrderIntent]:
         """Called once per price update for each symbol in self.symbols.
 
+        Must be a *decision*, not a commitment: an intent returned here has
+        not been placed, let alone filled, and may be rejected. Implementations
+        should not record "I am now holding X" from this method — wait for
+        on_fill(). Deciding here and committing there is what stops a rejected
+        order from leaving the strategy's view of its own position wrong.
+
         Args:
             symbol: The ticker this update is for.
             price: Latest price for that ticker.
@@ -50,3 +56,31 @@ class Strategy(ABC):
             wants to trade.
         """
         raise NotImplementedError
+
+    def on_fill(self, symbol: str, side: OrderSide, fill_price: float) -> None:
+        """Called after an intent from on_price() actually filled.
+
+        This is where position state belongs. `fill_price` is the price the
+        engine executed at, which is not the price on_price() saw — that was a
+        mid-price from a separate lookup, this is the real bid or ask.
+
+        Args:
+            symbol: The ticker that traded.
+            side: Which way it went.
+            fill_price: The executed price.
+        """
+
+    def on_reject(self, symbol: str, side: OrderSide, price: float,
+                  reason: str) -> None:
+        """Called when an intent from on_price() was refused.
+
+        Nothing happened: no cash moved and no position changed. A strategy
+        may want to react anyway — for example by re-anchoring, so it does not
+        resubmit the same rejected order on every subsequent tick.
+
+        Args:
+            symbol: The ticker that was refused.
+            side: Which way the refused order went.
+            price: The price on_price() acted on.
+            reason: Human-readable rejection reason.
+        """

@@ -135,6 +135,11 @@ def run() -> None:
                             order_type=intent.order_type.value,
                             limit_price=intent.limit_price,
                         )
+                        # Only now does the strategy learn it holds (or has
+                        # released) the position. on_price() deliberately does
+                        # not assume its own intent succeeded.
+                        strategy.on_fill(intent.symbol, intent.side,
+                                         float(order.filled_price))
                         print(f"[strategy_runner] {intent.side.value} {intent.quantity} {intent.symbol} @ {order.filled_price}")
                         append_csv(
                             TRADES_LOG_PATH,
@@ -148,8 +153,16 @@ def run() -> None:
                             ],
                         )
                     except (InsufficientFundsError, InsufficientPositionError) as e:
+                        # Refused outright: nothing moved, so tell the strategy
+                        # rather than letting it keep resubmitting.
+                        strategy.on_reject(intent.symbol, intent.side, price, str(e))
                         print(f"[strategy_runner] order rejected: {e}")
                     except RiskEngineUnavailableError:
+                        # Genuinely ambiguous - the engine may have committed
+                        # the fill before the connection failed. Report neither
+                        # outcome and leave the strategy's state untouched; if
+                        # the threshold still holds next tick it will simply
+                        # decide again.
                         print("[strategy_runner] risk engine unavailable while placing order, skipping")
 
                 cash, equity = compute_equity(user.id, app.risk_engine)

@@ -258,10 +258,14 @@ separate books, or start and stop one without restarting the runner.
 **Fix.** The `Strategy` base class in `strategies/base.py` is already the right
 seam. What is missing is a registry, a per-strategy account, and supervision.
 
-**Related bug worth noting.** `ThresholdStrategy.on_price` flips
-`self.holding[symbol]` to `True` *before* the order is known to have succeeded.
-A rejected order leaves the strategy believing it holds a position it does not.
-Small, real, and worth fixing whenever the strategy layer is next touched.
+**Fixed since first draft.** `ThresholdStrategy.on_price` used to flip
+`self.holding[symbol]` before the order was known to have succeeded, so a
+rejected order left the strategy believing it held a position it did not — and
+since it only sells what it thinks it holds, that symbol stopped trading. The
+`Strategy` contract now separates deciding from committing: `on_price` is pure,
+and `on_fill` / `on_reject` report the real outcome back. A side benefit is that
+the reference price now anchors to the actual execution price rather than the
+mid-price the decision was made on.
 
 ---
 
